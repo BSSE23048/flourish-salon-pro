@@ -3,21 +3,40 @@ import { useNavigate } from "react-router-dom";
 import { Scissors, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 export default function Login() {
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+
+    if (isSignUp) {
+      const { error } = await signUp(email, password, fullName);
       setLoading(false);
-      navigate("/");
-    }, 800);
+      if (error) {
+        toast.error(error);
+      } else {
+        toast.success("Account created! Please check your email to verify your account.");
+      }
+    } else {
+      const { error } = await signIn(email, password);
+      setLoading(false);
+      if (error) {
+        toast.error(error);
+      } else {
+        navigate("/");
+      }
+    }
   };
 
   return (
@@ -28,11 +47,24 @@ export default function Login() {
             <Scissors className="w-7 h-7 text-primary-foreground" />
           </div>
           <h1 className="text-2xl font-bold text-foreground">Glamour Studio</h1>
-          <p className="text-sm text-muted-foreground mt-1">Sign in to manage your salon</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isSignUp ? "Create your account" : "Sign in to manage your salon"}
+          </p>
         </div>
 
         <div className="bg-card rounded-xl border border-border p-6 shadow-card">
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isSignUp && (
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">Full Name</label>
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your name"
+                  required
+                />
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">Email</label>
               <Input
@@ -52,6 +84,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
+                  minLength={6}
                 />
                 <button
                   type="button"
@@ -63,14 +96,19 @@ export default function Login() {
               </div>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? (isSignUp ? "Creating account..." : "Signing in...") : (isSignUp ? "Create Account" : "Sign In")}
             </Button>
           </form>
-        </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          Demo: use any email & password to enter
-        </p>
+          <div className="mt-4 text-center">
+            <button
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-sm text-primary hover:underline"
+            >
+              {isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
