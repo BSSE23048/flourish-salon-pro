@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Plus, Search, Filter } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable, { StatusBadge, AppointmentStatus } from "@/components/DataTable";
+import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
-const appointments = [
+const initialAppointments = [
   { id: 1, date: "2026-02-26", time: "10:00 AM", customer: "Ayesha Khan", phone: "0300-1234567", service: "Haircut & Blowdry", staff: "Sara", status: "Booked" as AppointmentStatus },
   { id: 2, date: "2026-02-26", time: "11:30 AM", customer: "Fatima Ali", phone: "0321-7654321", service: "Facial Treatment", staff: "Nadia", status: "Completed" as AppointmentStatus },
   { id: 3, date: "2026-02-26", time: "1:00 PM", customer: "Zainab Raza", phone: "0333-1112233", service: "Manicure & Pedicure", staff: "Hina", status: "Booked" as AppointmentStatus },
@@ -16,13 +18,13 @@ const appointments = [
 ];
 
 export default function Appointments() {
+  const [appointments, setAppointments] = useState(initialAppointments);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [showAdd, setShowAdd] = useState(false);
 
   const filtered = appointments.filter((a) => {
-    const matchesSearch =
-      a.customer.toLowerCase().includes(search.toLowerCase()) ||
-      a.phone.includes(search);
+    const matchesSearch = a.customer.toLowerCase().includes(search.toLowerCase()) || a.phone.includes(search);
     const matchesStatus = statusFilter === "All" || a.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -32,43 +34,42 @@ export default function Appointments() {
       <PageHeader
         title="Appointments"
         subtitle="Manage all bookings and scheduling"
-        actions={
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            New Appointment
-          </Button>
-        }
+        actions={<Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4 mr-2" />New Appointment</Button>}
+      />
+
+      <FormDialog
+        open={showAdd}
+        onOpenChange={setShowAdd}
+        title="New Appointment"
+        fields={[
+          { key: "customer", label: "Customer Name", required: true, placeholder: "e.g. Ayesha Khan" },
+          { key: "phone", label: "Phone", type: "tel", required: true, placeholder: "0300-1234567" },
+          { key: "service", label: "Service", type: "select", options: ["Haircut & Blowdry", "Facial Treatment", "Manicure & Pedicure", "Hair Color", "Bridal Makeup", "Hair Spa", "Threading", "Gel Nails", "Party Makeup"], required: true },
+          { key: "staff", label: "Staff", type: "select", options: ["Sara", "Nadia", "Hina", "Amina", "Rukhsar"], required: true },
+          { key: "date", label: "Date", type: "date", required: true },
+          { key: "time", label: "Time", type: "time", required: true },
+        ]}
+        onSubmit={(data) => {
+          const timeStr = data.time ? new Date(`2000-01-01T${data.time}`).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "";
+          const newAppt = { id: appointments.length + 1, date: data.date, time: timeStr, customer: data.customer, phone: data.phone, service: data.service, staff: data.staff, status: "Booked" as AppointmentStatus };
+          setAppointments([newAppt, ...appointments]);
+          toast.success(`Appointment booked for ${data.customer}`);
+        }}
+        submitLabel="Book Appointment"
       />
 
       <div className="bg-card rounded-xl border border-border shadow-card">
-        {/* Filters */}
         <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name or phone..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+            <Input placeholder="Search by name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <div className="flex gap-2">
             {["All", "Booked", "Completed", "Cancelled"].map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                  statusFilter === s
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {s}
-              </button>
+              <button key={s} onClick={() => setStatusFilter(s)} className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${statusFilter === s ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}>{s}</button>
             ))}
           </div>
         </div>
-
         <DataTable
           columns={[
             { key: "date", label: "Date" },

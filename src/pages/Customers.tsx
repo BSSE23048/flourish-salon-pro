@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Plus, Search, Phone, Mail } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
+import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
-const customers = [
+const initialCustomers = [
   { id: 1, name: "Ayesha Khan", phone: "0300-1234567", email: "ayesha@email.com", visits: 12, lastVisit: "2026-02-26", totalSpent: "Rs. 42,500", notes: "Prefers Sara for haircuts" },
   { id: 2, name: "Fatima Ali", phone: "0321-7654321", email: "fatima@email.com", visits: 8, lastVisit: "2026-02-26", totalSpent: "Rs. 28,000", notes: "Allergic to certain products" },
   { id: 3, name: "Zainab Raza", phone: "0333-1112233", email: "zainab@email.com", visits: 15, lastVisit: "2026-02-26", totalSpent: "Rs. 55,200", notes: "VIP customer" },
@@ -15,12 +17,12 @@ const customers = [
 ];
 
 export default function Customers() {
+  const [customers, setCustomers] = useState(initialCustomers);
   const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
 
-  const filtered = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone.includes(search)
+  const filtered = customers.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
   );
 
   return (
@@ -28,27 +30,43 @@ export default function Customers() {
       <PageHeader
         title="Customers"
         subtitle="Manage your customer database"
-        actions={
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Customer
-          </Button>
-        }
+        actions={<Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4 mr-2" />Add Customer</Button>}
+      />
+
+      <FormDialog
+        open={showAdd}
+        onOpenChange={setShowAdd}
+        title="Add Customer"
+        fields={[
+          { key: "name", label: "Full Name", required: true, placeholder: "e.g. Ayesha Khan" },
+          { key: "phone", label: "Phone", type: "tel", required: true, placeholder: "0300-1234567" },
+          { key: "email", label: "Email", type: "email", placeholder: "customer@email.com" },
+          { key: "notes", label: "Notes", type: "textarea", placeholder: "Any preferences or notes..." },
+        ]}
+        onSubmit={(data) => {
+          const newCustomer = {
+            id: customers.length + 1,
+            name: data.name,
+            phone: data.phone,
+            email: data.email,
+            notes: data.notes || "",
+            visits: 0,
+            lastVisit: new Date().toISOString().split("T")[0],
+            totalSpent: "Rs. 0",
+          };
+          setCustomers([newCustomer, ...customers]);
+          toast.success(`Customer ${data.name} added successfully!`);
+        }}
+        submitLabel="Add Customer"
       />
 
       <div className="bg-card rounded-xl border border-border shadow-card">
         <div className="p-4 border-b border-border">
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name or phone..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+            <Input placeholder="Search by name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
         </div>
-
         <DataTable
           columns={[
             { key: "name", label: "Name", render: (row) => <span className="font-medium">{row.name}</span> },
