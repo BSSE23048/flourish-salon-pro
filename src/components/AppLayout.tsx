@@ -17,6 +17,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const navItems = [
   { title: "Dashboard", icon: LayoutDashboard, path: "/" },
@@ -33,6 +35,13 @@ const navItems = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { profile, role, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login");
+  };
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -92,7 +101,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Bottom */}
         <div className="p-3 border-t border-border">
-          <button className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground w-full transition-colors">
+        <button onClick={handleSignOut} className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground w-full transition-colors">
             <LogOut className="w-5 h-5" />
             Sign Out
           </button>
@@ -119,11 +128,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </button>
             <div className="flex items-center gap-2 pl-3 border-l border-border">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-xs font-semibold text-primary">SA</span>
+                <span className="text-xs font-semibold text-primary">
+                  {profile?.full_name?.slice(0, 2).toUpperCase() || "SA"}
+                </span>
               </div>
               <div className="hidden sm:block">
-                <p className="text-sm font-medium text-foreground">Salon Admin</p>
-                <p className="text-xs text-muted-foreground">Owner</p>
+                <p className="text-sm font-medium text-foreground">{profile?.full_name || "User"}</p>
+                <p className="text-xs text-muted-foreground capitalize">{role || "Staff"}</p>
               </div>
               <ChevronDown className="w-4 h-4 text-muted-foreground hidden sm:block" />
             </div>
