@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface FormField {
   key: string;
@@ -25,19 +25,25 @@ interface FormDialogProps {
 }
 
 export default function FormDialog({ open, onOpenChange, title, fields, onSubmit, submitLabel = "Save" }: FormDialogProps) {
-  const [values, setValues] = useState<Record<string, string>>(() => {
+  const initialValues = useMemo(() => {
     const init: Record<string, string> = {};
     fields.forEach((f) => { init[f.key] = f.defaultValue || ""; });
     return init;
-  });
+  }, [fields]);
+
+  const [values, setValues] = useState<Record<string, string>>(initialValues);
+
+  useEffect(() => {
+    if (open) {
+      setValues(initialValues);
+    }
+  }, [initialValues, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmit(values);
     // Reset
-    const init: Record<string, string> = {};
-    fields.forEach((f) => { init[f.key] = f.defaultValue || ""; });
-    setValues(init);
+    setValues(initialValues);
     onOpenChange(false);
   };
 

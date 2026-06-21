@@ -67,7 +67,7 @@ export default function Services() {
           open={!!editService}
           onOpenChange={() => setEditService(null)}
           title="Edit Service"
-          fields={formFields.map((f) => ({ ...f, defaultValue: (editService as any)[f.key] || "" }))}
+          fields={formFields.map((f) => ({ ...f, defaultValue: String(editService[f.key as keyof typeof editService] || "") }))}
           onSubmit={(data) => {
             setServices(services.map((s) => s.id === editService.id ? { ...s, name: data.name, category: data.category, price: data.price, duration: data.duration } : s));
             setEditService(null);

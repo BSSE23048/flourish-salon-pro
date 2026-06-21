@@ -1,31 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 @layer base {
   :root {
-    --background: 0 0% 99%;
-    --foreground: 240 10% 10%;
+    --background: 38 42% 96%;
+    --foreground: 30 18% 13%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --card: 42 45% 99%;
+    --card-foreground: 30 18% 13%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 10%;
 
-    --primary: 252 56% 57%;
+    --primary: 145 25% 25%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 250 30% 96%;
-    --secondary-foreground: 252 56% 57%;
+    --secondary: 36 42% 91%;
+    --secondary-foreground: 22 43% 36%;
 
-    --muted: 240 10% 96%;
-    --muted-foreground: 240 5% 46%;
+    --muted: 36 38% 92%;
+    --muted-foreground: 30 12% 42%;
 
-    --accent: 252 56% 95%;
-    --accent-foreground: 252 56% 40%;
+    --accent: 24 52% 90%;
+    --accent-foreground: 22 43% 36%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -36,9 +36,9 @@
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
 
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 252 56% 57%;
+    --border: 35 29% 82%;
+    --input: 35 29% 82%;
+    --ring: 24 48% 52%;
 
     --radius: 0.75rem;
 
@@ -51,9 +51,9 @@
     --sidebar-border: 240 6% 93%;
     --sidebar-ring: 252 56% 57%;
 
-    --chart-1: 252 56% 57%;
-    --chart-2: 199 89% 48%;
-    --chart-3: 142 71% 45%;
+    --chart-1: 24 48% 52%;
+    --chart-2: 145 25% 35%;
+    --chart-3: 42 42% 54%;
     --chart-4: 38 92% 50%;
     --chart-5: 0 72% 51%;
 
@@ -70,6 +70,10 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  .font-serif {
+    font-family: 'Playfair Display', Georgia, serif;
   }
 }
 

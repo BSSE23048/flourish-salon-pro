@@ -1,6 +1,4 @@
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-
 export type AppointmentStatus = "Booked" | "Completed" | "Cancelled";
 
 const statusStyles: Record<AppointmentStatus, string> = {
@@ -15,7 +13,7 @@ interface DataTableProps<T> {
   emptyMessage?: string;
 }
 
-export default function DataTable<T extends Record<string, any>>({
+export default function DataTable<T extends Record<string, React.ReactNode>>({
   columns,
   data,
   emptyMessage = "No data found",

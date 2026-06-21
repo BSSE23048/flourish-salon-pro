@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import Link from "next/link";
+import { useRouter } from "next/router";
 import {
   LayoutDashboard,
   Calendar,
@@ -18,29 +19,27 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
 
 const navItems = [
-  { title: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { title: "Appointments", icon: Calendar, path: "/appointments" },
-  { title: "Customers", icon: Users, path: "/customers" },
-  { title: "Staff", icon: UserCog, path: "/staff" },
-  { title: "Services", icon: Scissors, path: "/services" },
-  { title: "Inventory", icon: Package, path: "/inventory" },
-  { title: "Billing", icon: Receipt, path: "/billing" },
-  { title: "Reports", icon: BarChart3, path: "/reports" },
-  { title: "Settings", icon: Settings, path: "/settings" },
+  { title: "Dashboard", icon: LayoutDashboard, path: "/admin" },
+  { title: "Appointments", icon: Calendar, path: "/admin/appointments" },
+  { title: "Customers", icon: Users, path: "/admin/customers" },
+  { title: "Staff", icon: UserCog, path: "/admin/staff" },
+  { title: "Services", icon: Scissors, path: "/admin/services" },
+  { title: "Inventory", icon: Package, path: "/admin/inventory" },
+  { title: "Billing", icon: Receipt, path: "/admin/billing" },
+  { title: "Reports", icon: BarChart3, path: "/admin/reports" },
+  { title: "Settings", icon: Settings, path: "/admin/settings" },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const location = useLocation();
+  const router = useRouter();
   const { profile, role, signOut } = useAuth();
-  const navigate = useNavigate();
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/login");
+    router.push("/login");
   };
 
   return (
@@ -79,11 +78,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = router.pathname === item.path;
             return (
               <Link
                 key={item.path}
-                to={item.path}
+                href={item.path}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",

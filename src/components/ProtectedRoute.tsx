@@ -1,8 +1,28 @@
-import { Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useRouter } from "next/router";
 import { useAuth } from "@/contexts/AuthContext";
 
-export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
+type AppRole = "owner" | "staff" | "customer";
+
+export default function ProtectedRoute({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: AppRole[];
+}) {
+  const { session, loading, role } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !session) {
+      router.replace("/login");
+      return;
+    }
+    if (!loading && session && allowedRoles?.length && role && !allowedRoles.includes(role)) {
+      router.replace(role === "staff" ? "/staff" : "/");
+    }
+  }, [allowedRoles, loading, role, router, session]);
 
   if (loading) {
     return (
@@ -13,7 +33,11 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }
 
   if (!session) {
-    return <Navigate to="/login" replace />;
+    return null;
+  }
+
+  if (allowedRoles?.length && role && !allowedRoles.includes(role)) {
+    return null;
   }
 
   return <>{children}</>;

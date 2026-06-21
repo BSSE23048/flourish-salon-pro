@@ -9,7 +9,7 @@ import { toast } from "sonner";
 
 const initialAppointments = [
   { id: 1, date: "2026-02-26", time: "10:00 AM", customer: "Ayesha Khan", phone: "0300-1234567", service: "Haircut & Blowdry", staff: "Sara", status: "Booked" as AppointmentStatus },
-  { id: 2, date: "2026-02-26", time: "11:30 AM", customer: "Fatima Ali", phone: "0321-7654321", service: "Facial Treatment", staff: "Nadia", status: "Completed" as AppointmentStatus },
+  { id: 2, date: "2026-02-26", time: "11:30 AM", customer: "Ahmad Ali", phone: "0321-7654321", service: "Facial Treatment", staff: "Nadia", status: "Completed" as AppointmentStatus },
   { id: 3, date: "2026-02-26", time: "1:00 PM", customer: "Zainab Raza", phone: "0333-1112233", service: "Manicure & Pedicure", staff: "Hina", status: "Booked" as AppointmentStatus },
   { id: 4, date: "2026-02-25", time: "2:30 PM", customer: "Mehak Tariq", phone: "0345-9998887", service: "Hair Color", staff: "Sara", status: "Completed" as AppointmentStatus },
   { id: 5, date: "2026-02-25", time: "4:00 PM", customer: "Sana Malik", phone: "0312-5556667", service: "Bridal Makeup", staff: "Nadia", status: "Cancelled" as AppointmentStatus },

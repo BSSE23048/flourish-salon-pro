@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/router";
 import { Scissors, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +34,7 @@ export default function Login() {
       if (error) {
         toast.error(error);
       } else {
-        navigate("/");
+        router.push(email.trim().toLowerCase().startsWith("staff") ? "/staff" : "/admin");
       }
     }
   };
@@ -101,6 +101,11 @@ export default function Login() {
           </form>
 
           <div className="mt-4 text-center">
+            <div className="mb-4 rounded-lg border border-border bg-muted/50 p-3 text-left text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">Demo access</p>
+              <p>Admin: admin@flourish.local / password123</p>
+              <p>Staff: staff@flourish.local / staff123</p>
+            </div>
             <button
               onClick={() => setIsSignUp(!isSignUp)}
               className="text-sm text-primary hover:underline"
