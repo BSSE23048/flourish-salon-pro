@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { io, Socket } from "socket.io-client";
 import { CalendarDays, Check, Clock, CreditCard, Scissors, Sparkles, UserRound, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ export default function CustomerPortal() {
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showBooking, setShowBooking] = useState(false);
 
   const service = useMemo(() => services.find((item) => item.id === selectedService), [selectedService, services]);
   const artist = useMemo(() => staff.find((item) => item.id === selectedStaff), [selectedStaff, staff]);
@@ -86,6 +88,25 @@ export default function CustomerPortal() {
       })
       .catch(() => toast.error("Could not load salon menu. Check the API server."));
   }, []);
+
+  useEffect(() => {
+    const socket: Socket = io(API_URL);
+    socket.on("staff:update", () => {
+      fetch(`${API_URL}/api/staff`)
+        .then((res) => res.json())
+        .then((staffData: StaffMember[]) => {
+          setStaff(staffData);
+          if (selectedStaff && !staffData.some((item) => item.id === selectedStaff)) {
+            setSelectedStaff("");
+            setSlots([]);
+            toast.info("That artist is offline today. Please choose another artist.");
+          }
+        });
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, [selectedStaff]);
 
   useEffect(() => {
     fetchAvailability();
@@ -190,6 +211,13 @@ export default function CustomerPortal() {
   return (
     <main className="min-h-screen bg-[#f7f2ea] text-[#231f1b]">
       <section className="border-b border-[#decfbd] bg-[#fbf8f2]/90 backdrop-blur">
+        <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 lg:px-10">
+          <Link href="/" className="font-serif text-2xl font-semibold">Flourish</Link>
+          <nav className="flex items-center gap-4 text-sm text-[#6f6459]">
+            <Link href="/login?portal=staff" className="hover:text-[#231f1b]">Staff Login</Link>
+            <Link href="/login?portal=admin" className="hover:text-[#231f1b]">Admin Portal</Link>
+          </nav>
+        </header>
         <div className="mx-auto grid min-h-[420px] max-w-7xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:px-10">
           <div className="flex flex-col justify-center">
             <Badge className="mb-5 w-fit bg-[#2f4f3f] text-white hover:bg-[#2f4f3f]">Premium salon booking</Badge>
@@ -200,6 +228,7 @@ export default function CustomerPortal() {
               Choose your service, artist, and live available time. Holds, deposits, waitlist, and cutoff rules are enforced before your appointment is confirmed.
             </p>
             <div className="mt-8 flex flex-wrap gap-3 text-sm text-[#5c5045]">
+              <Button onClick={() => setShowBooking(true)} className="bg-[#2f4f3f] px-6 hover:bg-[#263f33]">Book an Appointment</Button>
               <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">10 AM to 2 AM</span>
               <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">2-hour booking cutoff</span>
               <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">4-hour cancellation policy</span>
@@ -218,6 +247,7 @@ export default function CustomerPortal() {
         </div>
       </section>
 
+      {showBooking ? (
       <section className="mx-auto max-w-7xl px-6 py-8 lg:px-10">
         <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
           {steps.map((step, index) => (
@@ -320,6 +350,18 @@ export default function CustomerPortal() {
           </aside>
         </div>
       </section>
+      ) : (
+        <section className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {["Live artist availability", "Deposit-protected booking", "Easy reschedule policy"].map((item) => (
+              <div key={item} className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+                <p className="font-serif text-2xl">{item}</p>
+                <p className="mt-3 text-sm leading-6 text-[#6f6459]">A calm, premium salon flow built for real operating hours and real staff schedules.</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }

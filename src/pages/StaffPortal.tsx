@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, CheckCircle2, LogOut, Timer, Wallet } from "lucide-react";
+import { CalendarDays, CheckCircle2, LogOut, Power, Timer, UserCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -18,17 +18,31 @@ type Appointment = {
 };
 
 type StaffSchedule = {
-  staff?: { id: string; name: string; title: string };
+  staff?: { id: string; name: string; title: string; status: StaffAvailability };
   date: string;
   appointments: Appointment[];
+  attendance: AttendanceLog | null;
   commission: number;
 };
 
+type StaffAvailability = "online" | "offline_today" | "on_leave";
+type AttendanceLog = {
+  id: string;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  status: "clocked_in" | "clocked_out";
+};
+
 const statusOptions = ["arrived", "in_progress", "completed", "no_show"];
+const availabilityOptions: { value: StaffAvailability; label: string }[] = [
+  { value: "online", label: "Online" },
+  { value: "offline_today", label: "Offline Today" },
+  { value: "on_leave", label: "On Leave" },
+];
 
 export default function StaffPortal() {
   const { signOut, profile } = useAuth();
-  const [schedule, setSchedule] = useState<StaffSchedule>({ date: new Date().toISOString().slice(0, 10), appointments: [], commission: 0 });
+  const [schedule, setSchedule] = useState<StaffSchedule>({ date: new Date().toISOString().slice(0, 10), appointments: [], attendance: null, commission: 0 });
   const [loading, setLoading] = useState(false);
 
   const fetchSchedule = async () => {
@@ -37,6 +51,36 @@ export default function StaffPortal() {
     });
     const data = await res.json();
     setSchedule(data);
+  };
+
+  const updateAvailability = async (status: StaffAvailability) => {
+    const staffId = schedule.staff?.id || "stf-sara";
+    const res = await fetch(`${API_URL}/api/staff/${staffId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": staffId },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error || "Could not update availability");
+      return;
+    }
+    toast.success(`Availability set to ${status.replace("_", " ")}`);
+    await fetchSchedule();
+  };
+
+  const punchClock = async (action: "clock-in" | "clock-out") => {
+    const res = await fetch(`${API_URL}/api/staff/me/${action}`, {
+      method: "POST",
+      headers: { "x-role": "staff", "x-staff-id": schedule.staff?.id || "stf-sara" },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error || "Attendance update failed");
+      return;
+    }
+    toast.success(action === "clock-in" ? "Clocked in" : "Clocked out");
+    await fetchSchedule();
   };
 
   useEffect(() => {
@@ -75,7 +119,7 @@ export default function StaffPortal() {
         </Button>
       </header>
 
-      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
         <div className="rounded-lg border border-[#decfbd] bg-white p-5">
           <CalendarDays className="mb-3 h-5 w-5 text-[#b8794d]" />
           <p className="text-sm text-[#6f6459]">Today</p>
@@ -90,6 +134,40 @@ export default function StaffPortal() {
           <Timer className="mb-3 h-5 w-5 text-[#b8794d]" />
           <p className="text-sm text-[#6f6459]">Status workflow</p>
           <p className="text-2xl font-semibold">Arrived to completed</p>
+        </div>
+        <div className="rounded-lg border border-[#decfbd] bg-white p-5">
+          <UserCheck className="mb-3 h-5 w-5 text-[#b8794d]" />
+          <p className="text-sm text-[#6f6459]">Attendance</p>
+          <p className="text-2xl font-semibold">{schedule.attendance?.status?.replace("_", " ") || "Absent"}</p>
+        </div>
+      </section>
+
+      <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+          <h2 className="font-serif text-2xl">Availability</h2>
+          <p className="mt-1 text-sm text-[#6f6459]">Offline staff are hidden from customer booking immediately.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {availabilityOptions.map((option) => (
+              <Button
+                key={option.value}
+                variant={schedule.staff?.status === option.value ? "default" : "outline"}
+                onClick={() => updateAvailability(option.value)}
+              >
+                <Power className="mr-2 h-4 w-4" />
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+          <h2 className="font-serif text-2xl">Clock</h2>
+          <p className="mt-1 text-sm text-[#6f6459]">
+            {schedule.attendance?.clockInAt ? `Clocked in at ${new Date(schedule.attendance.clockInAt).toLocaleTimeString()}` : "Not clocked in yet"}
+          </p>
+          <div className="mt-4 flex gap-2">
+            <Button onClick={() => punchClock("clock-in")} disabled={Boolean(schedule.attendance?.clockInAt && !schedule.attendance?.clockOutAt)}>Clock In</Button>
+            <Button variant="outline" onClick={() => punchClock("clock-out")} disabled={!schedule.attendance?.clockInAt || Boolean(schedule.attendance?.clockOutAt)}>Clock Out</Button>
+          </div>
         </div>
       </section>
 

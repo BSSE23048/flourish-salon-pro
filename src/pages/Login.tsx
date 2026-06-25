@@ -15,6 +15,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
   const router = useRouter();
+  const portal = router.query.portal === "staff" ? "staff" : router.query.portal === "admin" ? "admin" : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,12 +30,12 @@ export default function Login() {
         toast.success("Account created! Please check your email to verify your account.");
       }
     } else {
-      const { error } = await signIn(email, password);
+      const { error, role } = await signIn(email, password);
       setLoading(false);
       if (error) {
         toast.error(error);
       } else {
-        router.push(email.trim().toLowerCase().startsWith("staff") ? "/staff" : "/admin");
+        router.push(role === "staff" ? "/staff" : role === "customer" ? "/" : "/admin");
       }
     }
   };
@@ -46,9 +47,9 @@ export default function Login() {
           <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
             <Scissors className="w-7 h-7 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Glamour Studio</h1>
+          <h1 className="text-2xl font-bold text-foreground">Flourish Salon Pro</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {isSignUp ? "Create your account" : "Sign in to manage your salon"}
+            {isSignUp ? "Create your account" : portal === "staff" ? "Staff sign in" : portal === "admin" ? "Admin portal sign in" : "Sign in to continue"}
           </p>
         </div>
 

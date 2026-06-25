@@ -14,6 +14,11 @@ const STAFF_DEMO_EMAIL = "staff@flourish.local";
 const STAFF_DEMO_PASSWORD = "staff123";
 const DEMO_STORAGE_KEY = "flourish-demo-auth";
 const ROLE_COOKIE = "flourish-role";
+const appRoles: AppRole[] = ["owner", "staff", "customer"];
+
+function toAppRole(value: string | null | undefined): AppRole {
+  return appRoles.includes(value as AppRole) ? (value as AppRole) : "customer";
+}
 
 interface AuthContextType {
   session: AuthSession | null;
@@ -21,7 +26,7 @@ interface AuthContextType {
   profile: { full_name: string; email: string | null } | null;
   role: AppRole | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null; role?: AppRole }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
@@ -108,20 +113,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [fetchUserData, setDemoSession]);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn: AuthContextType["signIn"] = async (email, password) => {
     if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
       setDemoSession(DEMO_EMAIL, "Salon Admin", "owner");
-      return { error: null };
+      return { error: null, role: "owner" };
     }
 
     if (email.trim().toLowerCase() === STAFF_DEMO_EMAIL && password === STAFF_DEMO_PASSWORD) {
       setDemoSession(STAFF_DEMO_EMAIL, "Sara Ahmed", "staff");
-      return { error: null };
+      return { error: null, role: "staff" };
     }
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      return { error: error?.message ?? null };
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return { error: error.message };
+
+      const userRole = data.user
+        ? await supabase.from("user_roles").select("role").eq("user_id", data.user.id).single()
+        : null;
+      const resolvedRole = toAppRole(userRole?.data?.role);
+      setRole(resolvedRole);
+      writeRoleCookie(resolvedRole);
+      return { error: null, role: resolvedRole };
     } catch {
       return {
         error: `Supabase is unreachable from this network. Use demo login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,

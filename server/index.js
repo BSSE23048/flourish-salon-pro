@@ -34,9 +34,9 @@ const services = [
 ];
 
 const staff = [
-  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, bio: "Editorial cuts, soft color, and quiet luxury finishes." },
-  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, bio: "Glow-focused facials and camera-ready makeup." },
-  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, bio: "Detail-led treatments with calm, precise timing." },
+  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, status: "online", bio: "Editorial cuts, soft color, and quiet luxury finishes." },
+  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, status: "online", bio: "Glow-focused facials and camera-ready makeup." },
+  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, status: "online", bio: "Detail-led treatments with calm, precise timing." },
 ];
 
 const state = {
@@ -72,6 +72,7 @@ const state = {
   ],
   holds: [],
   waitlist: [],
+  attendance: [],
   customers: [
     { id: 1, name: "Ayesha Khan", phone: "0300-1234567", visits: 12, lifetimeValue: 42500, segment: "VIP" },
     { id: 2, name: "Fatima Ali", phone: "0321-7654321", visits: 8, lifetimeValue: 28000, segment: "Regular" },
@@ -110,6 +111,18 @@ function staffFromRequest(req) {
 
 function getService(serviceId) {
   return services.find((service) => service.id === serviceId);
+}
+
+function getStaffMember(staffId) {
+  return staff.find((member) => member.id === staffId);
+}
+
+function isStaffBookable(staffId) {
+  return getStaffMember(staffId)?.status === "online";
+}
+
+function attendanceFor(staffId, date = today()) {
+  return state.attendance.find((entry) => entry.staffId === staffId && entry.date === date);
 }
 
 function atBusinessTime(date, hour, minute = 0) {
@@ -194,7 +207,7 @@ function validateBookingWindow(startAt, endAt) {
 function generateSlots({ date, staffId, serviceId }) {
   cleanupHolds();
   const service = getService(serviceId);
-  if (!service) return [];
+  if (!service || !isStaffBookable(staffId)) return [];
   const slots = [];
   for (let cursor = BUSINESS_OPEN_MINUTES; cursor + service.durationMinutes <= BUSINESS_CLOSE_MINUTES; cursor += SLOT_STEP_MINUTES) {
     const hour = Math.floor(cursor / 60);
@@ -251,11 +264,25 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/tenant", requireRole("admin", "staff"), (_req, res) => res.json(state.tenant));
 app.get("/api/services", (_req, res) => res.json(services));
-app.get("/api/staff", (_req, res) => res.json(staff));
+app.get("/api/staff", (req, res) => {
+  const includeUnavailable = req.query.includeUnavailable === "true" || ["admin", "staff"].includes(roleFromRequest(req));
+  res.json(includeUnavailable ? staff : staff.filter((member) => member.status === "online"));
+});
 
 app.get("/api/availability", (req, res) => {
   const { date = today(), staffId, serviceId } = req.query;
   if (!staffId || !serviceId) return res.status(400).json({ error: "staffId and serviceId are required" });
+  if (!isStaffBookable(staffId)) {
+    return res.json({
+      date,
+      staffId,
+      serviceId,
+      businessHours: { opensAt: "10:00", closesAt: "02:00", closesNextDay: true },
+      bookingCutoffMinutes: BOOKING_CUTOFF_MINUTES,
+      staffStatus: getStaffMember(staffId)?.status || "offline_today",
+      slots: [],
+    });
+  }
   res.json({
     date,
     staffId,
@@ -270,6 +297,7 @@ app.post("/api/holds", (req, res) => {
   const { date, time, staffId, serviceId, customerEmail } = req.body;
   const service = getService(serviceId);
   if (!service) return res.status(404).json({ error: "Service not found" });
+  if (!isStaffBookable(staffId)) return res.status(409).json({ error: "This staff member is offline today." });
   const start = parseBusinessStart(date, time);
   const end = new Date(start.getTime() + minutes(service.durationMinutes));
   const windowError = validateBookingWindow(start, end);
@@ -296,6 +324,7 @@ app.post("/api/bookings", (req, res) => {
   const { holdId, customerName, customerEmail, staffId, serviceId, date, time, notes } = req.body;
   const service = getService(serviceId);
   if (!service) return res.status(404).json({ error: "Service not found" });
+  if (!isStaffBookable(staffId)) return res.status(409).json({ error: "This staff member is offline today." });
 
   const hold = holdId ? state.holds.find((item) => item.id === holdId && item.status === "active") : null;
   const start = hold ? new Date(hold.startAt) : parseBusinessStart(date, time);
@@ -398,8 +427,67 @@ app.get("/api/staff/me/schedule", requireRole("staff", "admin"), (req, res) => {
     staff: staffMember,
     date,
     appointments,
+    attendance: attendanceFor(staffId, date) || null,
     commission: Math.round(revenue * ((staffMember?.commissionRate || 0) / 100)),
   });
+});
+
+app.patch("/api/staff/:id/status", requireRole("admin", "staff"), (req, res) => {
+  const staffMember = getStaffMember(req.params.id);
+  if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
+  if (roleFromRequest(req) === "staff" && staffMember.id !== staffFromRequest(req)) {
+    return res.status(403).json({ error: "Staff can only update their own availability" });
+  }
+  const allowed = ["online", "offline_today", "on_leave"];
+  if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
+  staffMember.status = req.body.status;
+  io.emit("staff:update", staffMember);
+  res.json(staffMember);
+});
+
+app.post("/api/staff/me/clock-in", requireRole("staff", "admin"), (req, res) => {
+  const staffId = staffFromRequest(req);
+  const date = today();
+  let entry = attendanceFor(staffId, date);
+  if (!entry) {
+    entry = { id: `att-${Date.now()}`, staffId, date, clockInAt: new Date().toISOString(), clockOutAt: null, status: "clocked_in" };
+    state.attendance.push(entry);
+  } else if (!entry.clockInAt) {
+    entry.clockInAt = new Date().toISOString();
+    entry.status = "clocked_in";
+  }
+  io.emit("attendance:update", attendanceSummary(date));
+  res.status(201).json(entry);
+});
+
+app.post("/api/staff/me/clock-out", requireRole("staff", "admin"), (req, res) => {
+  const staffId = staffFromRequest(req);
+  const date = today();
+  const entry = attendanceFor(staffId, date);
+  if (!entry?.clockInAt) return res.status(422).json({ error: "Clock in before clocking out" });
+  entry.clockOutAt = new Date().toISOString();
+  entry.status = "clocked_out";
+  io.emit("attendance:update", attendanceSummary(date));
+  res.json(entry);
+});
+
+function attendanceSummary(date = today()) {
+  return staff.map((member) => {
+    const entry = attendanceFor(member.id, date);
+    return {
+      staffId: member.id,
+      name: member.name,
+      title: member.title,
+      availabilityStatus: member.status,
+      attendanceStatus: entry?.status || (member.status === "online" ? "absent" : member.status),
+      clockInAt: entry?.clockInAt || null,
+      clockOutAt: entry?.clockOutAt || null,
+    };
+  });
+}
+
+app.get("/api/admin/attendance", requireRole("admin"), (req, res) => {
+  res.json({ date: req.query.date || today(), staff: attendanceSummary(req.query.date || today()) });
 });
 
 app.get("/api/metrics", requireRole("admin"), (_req, res) => {
