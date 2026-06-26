@@ -40,6 +40,15 @@ const availabilityOptions: { value: StaffAvailability; label: string }[] = [
   { value: "on_leave", label: "On Leave" },
 ];
 
+const getApiError = async (res: Response, fallback: string) => {
+  try {
+    const data = await res.json();
+    return data.error || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export default function StaffPortal() {
   const { signOut, profile } = useAuth();
   const [schedule, setSchedule] = useState<StaffSchedule>({ date: new Date().toISOString().slice(0, 10), appointments: [], attendance: null, commission: 0 });
@@ -55,32 +64,38 @@ export default function StaffPortal() {
 
   const updateAvailability = async (status: StaffAvailability) => {
     const staffId = schedule.staff?.id || "stf-sara";
-    const res = await fetch(`${API_URL}/api/staff/${staffId}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": staffId },
-      body: JSON.stringify({ status }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Could not update availability");
-      return;
+    try {
+      const res = await fetch(`${API_URL}/api/staff/${staffId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": staffId },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        toast.error(await getApiError(res, "Could not update availability"));
+        return;
+      }
+      toast.success(`Availability set to ${status.replace("_", " ")}`);
+      await fetchSchedule();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update availability");
     }
-    toast.success(`Availability set to ${status.replace("_", " ")}`);
-    await fetchSchedule();
   };
 
   const punchClock = async (action: "clock-in" | "clock-out") => {
-    const res = await fetch(`${API_URL}/api/staff/me/${action}`, {
-      method: "POST",
-      headers: { "x-role": "staff", "x-staff-id": schedule.staff?.id || "stf-sara" },
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Attendance update failed");
-      return;
+    try {
+      const res = await fetch(`${API_URL}/api/staff/me/${action}`, {
+        method: "POST",
+        headers: { "x-role": "staff", "x-staff-id": schedule.staff?.id || "stf-sara" },
+      });
+      if (!res.ok) {
+        toast.error(await getApiError(res, "Attendance update failed"));
+        return;
+      }
+      toast.success(action === "clock-in" ? "Clocked in" : "Clocked out");
+      await fetchSchedule();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Attendance update failed");
     }
-    toast.success(action === "clock-in" ? "Clocked in" : "Clocked out");
-    await fetchSchedule();
   };
 
   useEffect(() => {
@@ -95,8 +110,7 @@ export default function StaffPortal() {
         headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": "stf-sara" },
         body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not update appointment");
+      if (!res.ok) throw new Error(await getApiError(res, "Could not update appointment"));
       toast.success("Appointment status updated");
       await fetchSchedule();
     } catch (error) {

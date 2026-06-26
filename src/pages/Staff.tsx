@@ -38,11 +38,23 @@ function statusBadge(status: StaffAvailability) {
 export default function Staff() {
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadStaff = async () => {
-    const res = await fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } });
-    const data = await res.json();
-    setStaffList(data);
+    try {
+      setLoadError(null);
+      const res = await fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load staff");
+      }
+      setStaffList(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load staff";
+      setLoadError(`${message}. Make sure the API server is running on ${API_URL}.`);
+      setStaffList([]);
+      throw error;
+    }
   };
 
   useEffect(() => {
@@ -121,7 +133,7 @@ export default function Staff() {
             },
           ]}
           data={staffList}
-          emptyMessage="No staff found"
+          emptyMessage={loadError || "No staff found"}
         />
       </div>
     </div>
