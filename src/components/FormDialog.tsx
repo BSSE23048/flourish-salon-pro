@@ -8,11 +8,12 @@ import { useEffect, useMemo, useState } from "react";
 interface FormField {
   key: string;
   label: string;
-  type?: "text" | "email" | "tel" | "number" | "select" | "textarea" | "date" | "time" | "url";
+  type?: "text" | "email" | "tel" | "number" | "select" | "textarea" | "date" | "time" | "url" | "file";
   placeholder?: string;
   options?: string[];
   required?: boolean;
   defaultValue?: string;
+  accept?: string;
 }
 
 interface FormDialogProps {
@@ -47,16 +48,29 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
     onOpenChange(false);
   };
 
+  const handleFileChange = (fieldKey: string, file: File | undefined) => {
+    if (!file) {
+      setValues({ ...values, [fieldKey]: "" });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setValues((current) => ({ ...current, [fieldKey]: String(reader.result || "") }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="sr-only">
             Complete the form fields and submit to save changes.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+        <form onSubmit={handleSubmit} className="mt-2 max-h-[calc(90vh-9rem)] space-y-4 overflow-y-auto pr-1">
           {fields.map((field) => (
             <div key={field.key}>
               <label className="text-sm font-medium text-foreground mb-1.5 block">{field.label}</label>
@@ -76,6 +90,18 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
                   placeholder={field.placeholder}
                   required={field.required}
                 />
+              ) : field.type === "file" ? (
+                <div className="space-y-2">
+                  <Input
+                    type="file"
+                    accept={field.accept}
+                    onChange={(e) => handleFileChange(field.key, e.target.files?.[0])}
+                    required={field.required && !values[field.key]}
+                  />
+                  {values[field.key] && (
+                    <img src={values[field.key]} alt="" className="h-28 w-full rounded-md border object-cover" />
+                  )}
+                </div>
               ) : (
                 <Input
                   type={field.type || "text"}
@@ -87,7 +113,7 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
               )}
             </div>
           ))}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 bg-background/95 px-1 pb-1 pt-3 backdrop-blur">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit">{submitLabel}</Button>
           </div>

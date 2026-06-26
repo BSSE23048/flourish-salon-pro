@@ -13,7 +13,7 @@ const io = new Server(server, {
 });
 
 app.use(cors({ origin: clientOrigin }));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 const BUSINESS_OPEN_MINUTES = 10 * 60;
 const BUSINESS_CLOSE_MINUTES = 26 * 60;

@@ -105,6 +105,15 @@ function money(value: number) {
   return `Rs. ${value.toLocaleString()}`;
 }
 
+function serviceCategoryLabel(category: string) {
+  const labels: Record<string, string> = {
+    All: "All services",
+    Hair: "Haircut",
+  };
+
+  return labels[category] || category;
+}
+
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -126,10 +135,48 @@ export default function CustomerPortal() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [activeServiceCategory, setActiveServiceCategory] = useState("All");
 
   const service = useMemo(() => services.find((item) => item.id === selectedService), [selectedService, services]);
   const artist = useMemo(() => staff.find((item) => item.id === selectedStaff), [selectedStaff, staff]);
+  const serviceCategories = useMemo(() => {
+    const categories = Array.from(new Set(services.map((item) => item.category).filter(Boolean))).sort();
+    return ["All", ...categories];
+  }, [services]);
+  const visibleServices = useMemo(() => {
+    if (activeServiceCategory === "All") return services;
+    return services.filter((item) => item.category === activeServiceCategory);
+  }, [activeServiceCategory, services]);
   const activeStep = !selectedService ? 0 : !selectedStaff ? 1 : !selectedSlot ? 2 : 3;
+
+  useEffect(() => {
+    if (activeServiceCategory !== "All" && !serviceCategories.includes(activeServiceCategory)) {
+      setActiveServiceCategory("All");
+    }
+  }, [activeServiceCategory, serviceCategories]);
+
+  const renderServiceFilters = () => (
+    <div className="-mx-1 mb-6 flex gap-2 overflow-x-auto px-1 pb-2">
+      {serviceCategories.map((category) => {
+        const active = activeServiceCategory === category;
+
+        return (
+          <button
+            key={category}
+            type="button"
+            onClick={() => setActiveServiceCategory(category)}
+            className={`shrink-0 rounded-full border px-5 py-2 text-sm font-black transition ${
+              active
+                ? "border-[#005a57] bg-[#005a57] text-white shadow-lg shadow-[#005a57]/20"
+                : "border-[#decfbd] bg-white/85 text-[#071d21] hover:border-[#005a57] hover:text-[#005a57]"
+            }`}
+          >
+            {serviceCategoryLabel(category)}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   const scrollToSection = (href: string) => {
     window.setTimeout(() => {
@@ -661,8 +708,11 @@ export default function CustomerPortal() {
                 </article>
               ))}
             </div>
-            <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-              {services.map((item) => (
+            <div className="mt-12">
+              {renderServiceFilters()}
+            </div>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+              {visibleServices.map((item) => (
                 <article key={item.id} className="overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
                   <div className="h-48 bg-[#071d21]">
                     <img
@@ -683,9 +733,9 @@ export default function CustomerPortal() {
                   </div>
                 </article>
               ))}
-              {services.length === 0 && (
+              {visibleServices.length === 0 && (
                 <div className="rounded-lg border border-[#decfbd] bg-white p-7 text-sm font-semibold text-[#6f6459] md:col-span-2 xl:col-span-4">
-                  Services will appear here when the API server is running.
+                  {services.length === 0 ? "Services will appear here when the API server is running." : "No services are available in this category yet."}
                 </div>
               )}
             </div>
@@ -716,8 +766,9 @@ export default function CustomerPortal() {
               </div>
               <Button onClick={openBooking} className="w-fit rounded-full bg-[#005a57] px-6 text-white hover:bg-[#004845]">Book a package</Button>
             </div>
+            {renderServiceFilters()}
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-              {services.map((item) => (
+              {visibleServices.map((item) => (
                 <article key={item.id} className="overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-sm">
                   <div className="h-44 bg-[#071d21]">
                     <img
@@ -739,9 +790,9 @@ export default function CustomerPortal() {
                   </div>
                 </article>
               ))}
-              {services.length === 0 && (
+              {visibleServices.length === 0 && (
                 <div className="rounded-lg border border-[#decfbd] bg-white p-7 text-sm font-semibold text-[#6f6459] md:col-span-2 xl:col-span-4">
-                  Start the API server to load admin-managed service pricing.
+                  {services.length === 0 ? "Start the API server to load admin-managed service pricing." : "No services are available in this category yet."}
                 </div>
               )}
             </div>

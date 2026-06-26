@@ -45,14 +45,14 @@ export default function Services() {
     loadServices().catch((error) => toast.error(error instanceof Error ? error.message : "Could not load services"));
   }, []);
 
-  const toPayload = (data: Record<string, string>) => ({
+  const toPayload = (data: Record<string, string>, existing?: Service | null) => ({
     name: data.name,
     category: data.category,
     price: Number(data.price),
     durationMinutes: Number(data.durationMinutes),
     deposit: Number(data.deposit || 0),
     description: data.description,
-    imageUrl: data.imageUrl || "/Hero_sec.png",
+    imageUrl: data.imageUrl || existing?.imageUrl || "/Hero_sec.png",
   });
 
   const formFields = [
@@ -61,7 +61,7 @@ export default function Services() {
     { key: "price", label: "Price (Rs.)", type: "number" as const, required: true, placeholder: "e.g. 1500" },
     { key: "durationMinutes", label: "Duration (minutes)", type: "number" as const, required: true, placeholder: "e.g. 45" },
     { key: "deposit", label: "Deposit (Rs.)", type: "number" as const, placeholder: "e.g. 1000" },
-    { key: "imageUrl", label: "Picture URL", type: "url" as const, placeholder: "e.g. /Hero_sec.png or https://..." },
+    { key: "imageUrl", label: "Upload Picture", type: "file" as const, accept: "image/*" },
     { key: "description", label: "Description", type: "textarea" as const, placeholder: "Describe what clients get" },
   ];
 
@@ -106,14 +106,14 @@ export default function Services() {
           open={!!editService}
           onOpenChange={() => setEditService(null)}
           title="Edit Service"
-          fields={formFields.map((f) => ({ ...f, defaultValue: String(editService[f.key as keyof Service] || "") }))}
+          fields={formFields.map((f) => ({ ...f, defaultValue: f.type === "file" ? "" : String(editService[f.key as keyof Service] || "") }))}
           onSubmit={async (data) => {
             setLoading(true);
             try {
               const res = await fetch(`${API_URL}/api/services/${editService.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json", "x-role": "admin" },
-                body: JSON.stringify(toPayload(data)),
+                body: JSON.stringify(toPayload(data, editService)),
               });
               const service = await res.json();
               if (!res.ok) throw new Error(service.error || "Could not update service");
