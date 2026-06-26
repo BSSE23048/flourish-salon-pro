@@ -1,9 +1,13 @@
 import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { io, Socket } from "socket.io-client";
-import { Armchair, CalendarDays, Check, Clock, CreditCard, Menu, PlayCircle, Scissors, ShieldCheck, Sparkles, Star, UserRound, Users, X } from "lucide-react";
+import type { Session } from "@supabase/supabase-js";
+import { Armchair, CalendarDays, Check, Clock, CreditCard, MapPin, Menu, Phone, PlayCircle, Scissors, ShieldCheck, Sparkles, Star, UserRound, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -16,6 +20,7 @@ type Service = {
   price: number;
   deposit: number;
   description: string;
+  imageUrl?: string;
 };
 
 type StaffMember = {
@@ -65,6 +70,37 @@ const navItems = [
   { label: "Contact", href: "#contact" },
 ];
 
+const featureCards = [
+  {
+    title: "Live artist availability",
+    copy: "See real appointment openings before you pick a stylist, with offline team members removed automatically.",
+    icon: Users,
+  },
+  {
+    title: "Deposit-protected booking",
+    copy: "Reserve premium slots with a clear deposit step that protects your time and the stylist's chair.",
+    icon: ShieldCheck,
+  },
+  {
+    title: "Easy reschedule policy",
+    copy: "Built-in cutoff windows make changes predictable, calm, and fair for clients and the studio.",
+    icon: Clock,
+  },
+];
+
+const stylistCards = [
+  { name: "Sara Ahmed", title: "Creative Director", specialty: "Sharp fades and textured executive cuts" },
+  { name: "Nadia Hussain", title: "Skin & Grooming Lead", specialty: "Facials, polish, and camera-ready finishes" },
+  { name: "Hina Rashid", title: "Detail Specialist", specialty: "Beard lines, finishing, and event grooming" },
+];
+
+const galleryCards = [
+  "Clean taper fade",
+  "Classic beard sculpt",
+  "Executive texture",
+  "Premium grooming suite",
+];
+
 function money(value: number) {
   return `Rs. ${value.toLocaleString()}`;
 }
@@ -87,6 +123,9 @@ export default function CustomerPortal() {
   const [loading, setLoading] = useState(false);
   const [showBooking, setShowBooking] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const service = useMemo(() => services.find((item) => item.id === selectedService), [selectedService, services]);
   const artist = useMemo(() => staff.find((item) => item.id === selectedStaff), [selectedStaff, staff]);
@@ -105,11 +144,53 @@ export default function CustomerPortal() {
     scrollToSection(href);
   };
 
-  const openBooking = () => {
+  const showBookingFlow = () => {
     setShowBooking(true);
     setMobileNavOpen(false);
     scrollToSection("#services");
   };
+
+  const openBooking = () => {
+    if (!authReady) return;
+    if (!session) {
+      setAuthModalOpen(true);
+      setMobileNavOpen(false);
+      return;
+    }
+    showBookingFlow();
+  };
+
+  const signInWithProvider = async (provider: "google" | "apple") => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("glamour-pending-booking", "true");
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
+
+    if (error) {
+      toast.error(error.message);
+    }
+  };
+
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setSession(null);
+    setShowBooking(false);
+    toast.success("Signed out");
+  };
+
+  const userInitials = session?.user.user_metadata?.full_name
+    ? String(session.user.user_metadata.full_name).split(" ").map((part) => part[0]).join("").slice(0, 2)
+    : session?.user.email?.slice(0, 2).toUpperCase() || "GS";
 
   const fetchAvailability = useCallback(async () => {
     if (!selectedService || !selectedStaff || !selectedDate) return;
@@ -118,6 +199,39 @@ export default function CustomerPortal() {
     const data = await res.json();
     setSlots(data.slots || []);
   }, [selectedDate, selectedService, selectedStaff]);
+
+  useEffect(() => {
+    const openPendingBooking = () => {
+      setShowBooking(true);
+      setMobileNavOpen(false);
+      window.setTimeout(() => {
+        document.querySelector("#services")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    };
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+        setAuthReady(true);
+
+        if (data.session && window.localStorage.getItem("glamour-pending-booking") === "true") {
+          window.localStorage.removeItem("glamour-pending-booking");
+          openPendingBooking();
+        }
+      })
+      .catch(() => setAuthReady(true));
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (nextSession && window.localStorage.getItem("glamour-pending-booking") === "true") {
+        window.localStorage.removeItem("glamour-pending-booking");
+        setAuthModalOpen(false);
+        openPendingBooking();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -155,6 +269,12 @@ export default function CustomerPortal() {
     setSelectedSlot(null);
     setHoldId(null);
   }, [fetchAvailability, selectedService, selectedStaff, selectedDate]);
+
+  useEffect(() => {
+    if (session?.user.email && !customerEmail) {
+      setCustomerEmail(session.user.email);
+    }
+  }, [customerEmail, session]);
 
   useEffect(() => {
     if (!selectedStaff || !selectedDate) return;
@@ -252,7 +372,7 @@ export default function CustomerPortal() {
 
   return (
     <main className="min-h-screen bg-[#f9f5ef] text-[#071d21]">
-      <section id="home" className="relative isolate min-h-[820px] scroll-mt-28 overflow-hidden bg-[#f7f2ea] md:min-h-[760px]">
+      <section id="home" className="relative min-h-[820px] scroll-mt-28 overflow-hidden bg-[#f7f2ea] md:min-h-[760px]">
         <div
           className="absolute inset-0 bg-cover bg-[66%_center] md:bg-center"
           style={{ backgroundImage: "url('/Hero_sec.png')" }}
@@ -260,7 +380,7 @@ export default function CustomerPortal() {
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(249,247,243,0.98)_0%,rgba(249,247,243,0.9)_27%,rgba(249,247,243,0.38)_50%,rgba(249,247,243,0)_72%)]" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#f9f5ef] via-[#f9f5ef]/70 to-transparent" />
 
-        <header className="fixed inset-x-0 top-4 z-50 px-4 md:px-8">
+        <header className="fixed inset-x-0 top-4 z-[100] px-4 md:px-8">
           <div className="mx-auto flex max-w-[1660px] items-center justify-between rounded-full border border-white/55 bg-white/45 px-4 py-3 shadow-2xl shadow-[#092f31]/10 backdrop-blur-xl md:px-6">
             <Link href="/" className="flex items-center gap-4">
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#005a57] text-white shadow-lg shadow-[#005a57]/20 md:h-14 md:w-14">
@@ -281,11 +401,30 @@ export default function CustomerPortal() {
             </nav>
 
             <div className="flex items-center gap-3">
-              <Button onClick={openBooking} className="hidden rounded-full border border-white/60 bg-[#005a57] px-6 py-6 text-white shadow-lg shadow-[#005a57]/20 hover:bg-[#004845] md:inline-flex">
+              <Button onClick={openBooking} disabled={!authReady} className="hidden rounded-full border border-white/60 bg-[#005a57] px-6 py-6 text-white shadow-lg shadow-[#005a57]/20 hover:bg-[#004845] md:inline-flex">
                 Book Appointment
                 <CalendarDays className="h-5 w-5" />
               </Button>
-              <Link href="/login?portal=admin" className="hidden text-sm font-semibold text-[#071d21] hover:text-[#005a57] md:block">Admin</Link>
+              {!session && (
+                <button
+                  type="button"
+                  onClick={() => setAuthModalOpen(true)}
+                  className="hidden text-sm font-semibold text-[#071d21] hover:text-[#005a57] md:block"
+                >
+                  Login
+                </button>
+              )}
+              {session && (
+                <div className="hidden items-center gap-2 rounded-full border border-white/60 bg-white/65 py-1 pl-1 pr-3 shadow-sm backdrop-blur md:flex">
+                  <Avatar className="h-9 w-9">
+                    <AvatarImage src={session.user.user_metadata?.avatar_url} alt="" />
+                    <AvatarFallback className="bg-[#005a57] text-xs font-bold text-white">{userInitials}</AvatarFallback>
+                  </Avatar>
+                  <button type="button" onClick={signOut} className="text-sm font-bold text-[#071d21] hover:text-[#005a57]">
+                    Sign Out
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 className="flex h-11 w-11 items-center justify-center rounded-full border border-[#d7cdc2] bg-white/70 text-[#071d21] lg:hidden"
@@ -314,9 +453,27 @@ export default function CustomerPortal() {
                   type="button"
                   className="mt-1 rounded-2xl bg-[#005a57] px-4 py-3 text-left text-white"
                   onClick={openBooking}
+                  disabled={!authReady}
                 >
                   Book Appointment
                 </button>
+                {!session && (
+                  <button
+                    type="button"
+                    className="rounded-2xl px-4 py-3 text-left hover:bg-[#e5efed] hover:text-[#005a57]"
+                    onClick={() => {
+                      setAuthModalOpen(true);
+                      setMobileNavOpen(false);
+                    }}
+                  >
+                    Login
+                  </button>
+                )}
+                {session && (
+                  <button type="button" className="rounded-2xl px-4 py-3 text-left hover:bg-[#e5efed] hover:text-[#005a57]" onClick={signOut}>
+                    Sign Out
+                  </button>
+                )}
               </nav>
             </div>
           )}
@@ -487,47 +644,209 @@ export default function CustomerPortal() {
         </div>
       </section>
       ) : (
-        <section id="services" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-12 lg:px-10">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {["Live artist availability", "Deposit-protected booking", "Easy reschedule policy"].map((item) => (
-              <div key={item} className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-                <p className="font-serif text-2xl">{item}</p>
-                <p className="mt-3 text-sm leading-6 text-[#6f6459]">A calm, premium salon flow built for real operating hours and real staff schedules.</p>
+        <>
+          <section id="services" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-16 lg:px-10">
+            <div className="mb-8 max-w-3xl">
+              <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">Client-first booking</p>
+              <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] text-[#071d21] md:text-5xl">Premium grooming without the waiting-room guessing.</h2>
+            </div>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+              {featureCards.map((item) => (
+                <article key={item.title} className="rounded-lg border border-[#decfbd] bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#e5efed] text-[#005a57]">
+                    <item.icon className="h-6 w-6" />
+                  </span>
+                  <h3 className="mt-6 text-2xl font-black text-[#071d21]">{item.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-[#6f6459]">{item.copy}</p>
+                </article>
+              ))}
+            </div>
+            <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+              {services.map((item) => (
+                <article key={item.id} className="overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+                  <div className="h-48 bg-[#071d21]">
+                    <img
+                      src={item.imageUrl || "/Hero_sec.png"}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={(event) => { event.currentTarget.src = "/Hero_sec.png"; }}
+                    />
+                  </div>
+                  <div className="p-6">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-[#6ea097]">{item.category}</p>
+                    <h3 className="mt-3 text-2xl font-black">{item.name}</h3>
+                    <p className="mt-3 text-sm leading-6 text-[#6f6459]">{item.description || "Premium salon service tailored to your look."}</p>
+                    <div className="mt-5 flex items-end justify-between gap-4">
+                      <p className="text-2xl font-black text-[#005a57]">{money(item.price)}</p>
+                      <p className="text-sm font-bold text-[#526066]">{item.durationMinutes} min</p>
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {services.length === 0 && (
+                <div className="rounded-lg border border-[#decfbd] bg-white p-7 text-sm font-semibold text-[#6f6459] md:col-span-2 xl:col-span-4">
+                  Services will appear here when the API server is running.
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section id="about-us" className="mx-auto grid max-w-7xl scroll-mt-28 grid-cols-1 gap-8 px-6 py-16 lg:grid-cols-[0.9fr_1.1fr] lg:px-10">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">About us</p>
+              <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] md:text-5xl">About Glamour Studio</h2>
+            </div>
+            <div className="rounded-lg border border-[#decfbd] bg-white p-7 shadow-sm">
+              <p className="text-lg leading-8 text-[#526066]">
+                Glamour Studio is a premium men&apos;s salon built around sharp craft, quiet comfort, and dependable scheduling. From precise fades to beard architecture and skin resets, every service is designed to feel polished without feeling rushed.
+              </p>
+              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {["Private grooming chairs", "Premium product shelf", "Live appointment holds"].map((item) => (
+                  <div key={item} className="rounded-lg bg-[#f4eee6] p-4 text-sm font-bold text-[#071d21]">{item}</div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div id="about-us" className="scroll-mt-28 pt-10">
-            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-              <p className="font-serif text-2xl">About Glamour Studio</p>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-[#6f6459]">Premium grooming, precise appointments, and dependable salon service for clients who want a polished experience from booking to checkout.</p>
             </div>
-          </div>
-          <div id="stylists" className="scroll-mt-28 pt-10">
-            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-              <p className="font-serif text-2xl">Stylists</p>
-              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Choose a specialist during booking and see live availability before confirming your visit.</p>
+          </section>
+
+          <section id="pricing" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-16 lg:px-10">
+            <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">Services & pricing</p>
+                <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] md:text-5xl">Hair, beard, and grooming packages.</h2>
+              </div>
+              <Button onClick={openBooking} className="w-fit rounded-full bg-[#005a57] px-6 text-white hover:bg-[#004845]">Book a package</Button>
             </div>
-          </div>
-          <div id="gallery" className="scroll-mt-28 pt-10">
-            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-              <p className="font-serif text-2xl">Gallery</p>
-              <p className="mt-3 text-sm leading-6 text-[#6f6459]">A polished men&apos;s salon atmosphere with premium finishes, sharp cuts, and tailored grooming.</p>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+              {services.map((item) => (
+                <article key={item.id} className="overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-sm">
+                  <div className="h-44 bg-[#071d21]">
+                    <img
+                      src={item.imageUrl || "/Hero_sec.png"}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={(event) => { event.currentTarget.src = "/Hero_sec.png"; }}
+                    />
+                  </div>
+                  <div className="p-6">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#6ea097]">{item.category}</p>
+                  <h3 className="mt-4 text-2xl font-black">{item.name}</h3>
+                  <p className="mt-3 text-sm leading-6 text-[#6f6459]">{item.description || "Premium grooming service"}</p>
+                  <div className="mt-6 flex items-end justify-between gap-4">
+                    <p className="text-2xl font-black text-[#005a57]">{money(item.price)}</p>
+                    <p className="text-sm font-bold text-[#526066]">{item.durationMinutes} min</p>
+                  </div>
+                  {item.deposit > 0 && <p className="mt-2 text-xs font-semibold text-[#6f6459]">Deposit: {money(item.deposit)}</p>}
+                  </div>
+                </article>
+              ))}
+              {services.length === 0 && (
+                <div className="rounded-lg border border-[#decfbd] bg-white p-7 text-sm font-semibold text-[#6f6459] md:col-span-2 xl:col-span-4">
+                  Start the API server to load admin-managed service pricing.
+                </div>
+              )}
             </div>
-          </div>
-          <div id="pricing" className="scroll-mt-28 pt-10">
-            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-              <p className="font-serif text-2xl">Pricing</p>
-              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Service pricing and deposits are shown inside the appointment flow before you confirm.</p>
+          </section>
+
+          <section id="stylists" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-16 lg:px-10">
+            <div className="mb-8 max-w-3xl">
+              <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">Stylists</p>
+              <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] md:text-5xl">Specialists for the finish you want.</h2>
             </div>
-          </div>
-          <div id="contact" className="scroll-mt-28 pt-10">
-            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
-              <p className="font-serif text-2xl">Contact</p>
-              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Book online anytime, or use the client flow to choose the service, stylist, and appointment slot that suits you.</p>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+              {stylistCards.map((item, index) => (
+                <article key={item.name} className="overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-sm">
+                  <div className="h-56 bg-cover bg-center" style={{ backgroundImage: "url('/Hero_sec.png')", backgroundPosition: `${42 + index * 18}% center` }} />
+                  <div className="p-6">
+                    <h3 className="text-2xl font-black">{item.name}</h3>
+                    <p className="mt-1 text-sm font-bold text-[#005a57]">{item.title}</p>
+                    <p className="mt-4 text-sm leading-6 text-[#6f6459]">{item.specialty}</p>
+                  </div>
+                </article>
+              ))}
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section id="gallery" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-16 lg:px-10">
+            <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">Gallery</p>
+                <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] md:text-5xl">Cuts, details, atmosphere.</h2>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+              {galleryCards.map((item, index) => (
+                <article key={item} className={`relative min-h-[260px] overflow-hidden rounded-lg border border-[#decfbd] bg-[#071d21] shadow-sm ${index === 0 ? "md:col-span-2" : ""}`}>
+                  <div className="absolute inset-0 bg-cover bg-center opacity-80" style={{ backgroundImage: "url('/Hero_sec.png')", backgroundPosition: `${24 + index * 20}% center` }} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#071d21]/90 to-transparent" />
+                  <p className="absolute bottom-5 left-5 text-xl font-black text-white">{item}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section id="contact" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-16 lg:px-10">
+            <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-[#decfbd] bg-white shadow-xl lg:grid-cols-[1fr_0.9fr]">
+              <div className="p-7 md:p-10">
+                <p className="text-sm font-black uppercase tracking-[0.22em] text-[#005a57]">Contact</p>
+                <h2 className="mt-3 text-4xl font-black tracking-[-0.02em] md:text-5xl">Visit the studio.</h2>
+                <div className="mt-8 grid gap-5 text-sm text-[#526066]">
+                  <p className="flex gap-3"><Clock className="h-5 w-5 text-[#005a57]" /> Mon-Sat, 10:00 AM to 2:00 AM</p>
+                  <p className="flex gap-3"><MapPin className="h-5 w-5 text-[#005a57]" /> 22 Clifton Grooming Lane, Karachi</p>
+                  <p className="flex gap-3"><Phone className="h-5 w-5 text-[#005a57]" /> +92 300 555 0101</p>
+                </div>
+                <Button onClick={openBooking} className="mt-8 rounded-full bg-[#005a57] px-7 text-white hover:bg-[#004845]">Book Appointment</Button>
+              </div>
+              <div className="min-h-[320px] bg-[#e5efed] p-5">
+                <div className="flex h-full min-h-[280px] items-center justify-center rounded-lg border border-[#c9d8d4] bg-[linear-gradient(135deg,#dfe9e6,#f8f4ed)] text-center text-sm font-bold text-[#005a57]">
+                  Location map placeholder
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
       )}
+
+      <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
+        <DialogContent className="overflow-hidden border-[#d8cdc0] bg-[#fbf8f2] p-0 text-[#071d21] sm:max-w-md">
+          <div className="bg-[#071d21] px-6 py-7 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-black">Sign in to book</DialogTitle>
+              <DialogDescription className="text-[#c9d8d4]">
+                Reserve your stylist, hold a live appointment slot, and manage your booking securely.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="space-y-3 p-6">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start rounded-lg border-[#d8cdc0] bg-white text-base font-bold text-[#071d21] hover:bg-[#f4eee6]"
+              onClick={() => signInWithProvider("google")}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#f1f5f3] text-sm font-black text-[#005a57]">G</span>
+              Continue with Google
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start rounded-lg border-[#d8cdc0] bg-white text-base font-bold text-[#071d21] hover:bg-[#f4eee6]"
+              onClick={() => signInWithProvider("apple")}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#071d21] text-sm font-black text-white">A</span>
+              Continue with Apple
+            </Button>
+            <p className="pt-2 text-center text-xs leading-5 text-[#6f6459]">
+              Authentication is powered by Supabase. Booking opens automatically after sign-in.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <style jsx global>{`
+        html {
+          scroll-behavior: smooth;
+        }
+      `}</style>
     </main>
   );
 }

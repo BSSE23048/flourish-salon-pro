@@ -27,10 +27,10 @@ const today = () => now().toISOString().slice(0, 10);
 const minutes = (value) => value * 60 * 1000;
 
 const services = [
-  { id: "svc-haircut", name: "Signature Haircut", category: "Hair", durationMinutes: 30, price: 3500, deposit: 1000, description: "Precision cut, consultation, and finishing polish." },
-  { id: "svc-facial", name: "Botanical Facial", category: "Skin", durationMinutes: 60, price: 6500, deposit: 1500, description: "A calming skin reset with massage and glow mask." },
-  { id: "svc-color", name: "Lived-In Color", category: "Color", durationMinutes: 120, price: 14500, deposit: 3500, description: "Dimensional color with toner and finish." },
-  { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, deposit: 5000, description: "Luxury bridal consultation and makeup trial." },
+  { id: "svc-haircut", name: "Signature Haircut", category: "Hair", durationMinutes: 30, price: 3500, deposit: 1000, description: "Precision cut, consultation, and finishing polish.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-facial", name: "Botanical Facial", category: "Skin", durationMinutes: 60, price: 6500, deposit: 1500, description: "A calming skin reset with massage and glow mask.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-color", name: "Lived-In Color", category: "Color", durationMinutes: 120, price: 14500, deposit: 3500, description: "Dimensional color with toner and finish.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, deposit: 5000, description: "Luxury bridal consultation and makeup trial.", imageUrl: "/Hero_sec.png", active: true },
 ];
 
 const staff = [
@@ -111,6 +111,24 @@ function staffFromRequest(req) {
 
 function getService(serviceId) {
   return services.find((service) => service.id === serviceId);
+}
+
+function normalizeServicePayload(input, existing = {}) {
+  const price = Number(input.price ?? existing.price ?? 0);
+  const durationMinutes = Number(input.durationMinutes ?? input.duration ?? existing.durationMinutes ?? 30);
+  const deposit = Number(input.deposit ?? existing.deposit ?? 0);
+
+  return {
+    ...existing,
+    name: String(input.name ?? existing.name ?? "").trim(),
+    category: String(input.category ?? existing.category ?? "Hair").trim(),
+    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 30,
+    price: Number.isFinite(price) && price >= 0 ? price : 0,
+    deposit: Number.isFinite(deposit) && deposit >= 0 ? deposit : 0,
+    description: String(input.description ?? existing.description ?? "").trim(),
+    imageUrl: String(input.imageUrl ?? existing.imageUrl ?? "/Hero_sec.png").trim() || "/Hero_sec.png",
+    active: input.active ?? existing.active ?? true,
+  };
 }
 
 function getStaffMember(staffId) {
@@ -264,6 +282,37 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/tenant", requireRole("admin", "staff"), (_req, res) => res.json(state.tenant));
 app.get("/api/services", (_req, res) => res.json(services));
+app.post("/api/services", requireRole("admin"), (req, res) => {
+  const payload = normalizeServicePayload(req.body);
+  if (!payload.name) return res.status(400).json({ error: "Service name is required" });
+
+  const service = {
+    id: `svc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ...payload,
+  };
+  services.push(service);
+  res.status(201).json(service);
+});
+app.patch("/api/services/:id", requireRole("admin"), (req, res) => {
+  const index = services.findIndex((service) => service.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Service not found" });
+
+  const nextService = {
+    ...services[index],
+    ...normalizeServicePayload(req.body, services[index]),
+  };
+  if (!nextService.name) return res.status(400).json({ error: "Service name is required" });
+
+  services[index] = nextService;
+  res.json(nextService);
+});
+app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
+  const index = services.findIndex((service) => service.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Service not found" });
+
+  const [removed] = services.splice(index, 1);
+  res.json(removed);
+});
 app.get("/api/staff", (req, res) => {
   const includeUnavailable = req.query.includeUnavailable === "true" || ["admin", "staff"].includes(roleFromRequest(req));
   res.json(includeUnavailable ? staff : staff.filter((member) => member.status === "online"));

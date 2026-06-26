@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import FormDialog from "@/components/FormDialog";
@@ -9,35 +9,60 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const categories = ["Hair", "Skin", "Nails", "Makeup", "Spa"];
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
-const initialServices = [
-  { id: 1, name: "Haircut & Blowdry", category: "Hair", price: "1500", duration: "45" },
-  { id: 2, name: "Hair Color (Full)", category: "Hair", price: "4000", duration: "120" },
-  { id: 3, name: "Hair Spa Treatment", category: "Spa", price: "3000", duration: "60" },
-  { id: 4, name: "Facial (Gold)", category: "Skin", price: "2500", duration: "60" },
-  { id: 5, name: "Facial (Diamond)", category: "Skin", price: "4500", duration: "75" },
-  { id: 6, name: "Manicure & Pedicure", category: "Nails", price: "2000", duration: "60" },
-  { id: 7, name: "Gel Nails", category: "Nails", price: "3500", duration: "90" },
-  { id: 8, name: "Bridal Makeup", category: "Makeup", price: "15000", duration: "180" },
-  { id: 9, name: "Party Makeup", category: "Makeup", price: "5000", duration: "90" },
-  { id: 10, name: "Threading (Full Face)", category: "Skin", price: "500", duration: "20" },
-];
+const categories = ["Hair", "Beard", "Grooming", "Skin", "Color", "Package"];
+
+type Service = {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  durationMinutes: number;
+  deposit: number;
+  description: string;
+  imageUrl: string;
+};
 
 export default function Services() {
-  const [services, setServices] = useState(initialServices);
+  const [services, setServices] = useState<Service[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
   const [showAdd, setShowAdd] = useState(false);
-  const [editService, setEditService] = useState<typeof initialServices[0] | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [editService, setEditService] = useState<Service | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const filtered = activeCategory === "All" ? services : services.filter((s) => s.category === activeCategory);
+
+  const loadServices = async () => {
+    const res = await fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load services");
+    setServices(data);
+  };
+
+  useEffect(() => {
+    loadServices().catch((error) => toast.error(error instanceof Error ? error.message : "Could not load services"));
+  }, []);
+
+  const toPayload = (data: Record<string, string>) => ({
+    name: data.name,
+    category: data.category,
+    price: Number(data.price),
+    durationMinutes: Number(data.durationMinutes),
+    deposit: Number(data.deposit || 0),
+    description: data.description,
+    imageUrl: data.imageUrl || "/Hero_sec.png",
+  });
 
   const formFields = [
     { key: "name", label: "Service Name", required: true, placeholder: "e.g. Haircut & Blowdry" },
     { key: "category", label: "Category", type: "select" as const, options: categories, required: true },
     { key: "price", label: "Price (Rs.)", type: "number" as const, required: true, placeholder: "e.g. 1500" },
-    { key: "duration", label: "Duration (minutes)", type: "number" as const, required: true, placeholder: "e.g. 45" },
+    { key: "durationMinutes", label: "Duration (minutes)", type: "number" as const, required: true, placeholder: "e.g. 45" },
+    { key: "deposit", label: "Deposit (Rs.)", type: "number" as const, placeholder: "e.g. 1000" },
+    { key: "imageUrl", label: "Picture URL", type: "url" as const, placeholder: "e.g. /Hero_sec.png or https://..." },
+    { key: "description", label: "Description", type: "textarea" as const, placeholder: "Describe what clients get" },
   ];
 
   return (
@@ -45,7 +70,7 @@ export default function Services() {
       <PageHeader
         title="Services"
         subtitle="Manage your salon service menu"
-        actions={<Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4 mr-2" />Add Service</Button>}
+        actions={<Button onClick={() => setShowAdd(true)} disabled={loading}><Plus className="w-4 h-4 mr-2" />Add Service</Button>}
       />
 
       {/* Add */}
@@ -54,9 +79,23 @@ export default function Services() {
         onOpenChange={setShowAdd}
         title="Add Service"
         fields={formFields}
-        onSubmit={(data) => {
-          setServices([...services, { id: Date.now(), name: data.name, category: data.category, price: data.price, duration: data.duration }]);
-          toast.success(`Service "${data.name}" added!`);
+        onSubmit={async (data) => {
+          setLoading(true);
+          try {
+            const res = await fetch(`${API_URL}/api/services`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-role": "admin" },
+              body: JSON.stringify(toPayload(data)),
+            });
+            const service = await res.json();
+            if (!res.ok) throw new Error(service.error || "Could not add service");
+            setServices((current) => [...current, service]);
+            toast.success(`Service "${data.name}" added!`);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not add service");
+          } finally {
+            setLoading(false);
+          }
         }}
         submitLabel="Add Service"
       />
@@ -67,11 +106,25 @@ export default function Services() {
           open={!!editService}
           onOpenChange={() => setEditService(null)}
           title="Edit Service"
-          fields={formFields.map((f) => ({ ...f, defaultValue: String(editService[f.key as keyof typeof editService] || "") }))}
-          onSubmit={(data) => {
-            setServices(services.map((s) => s.id === editService.id ? { ...s, name: data.name, category: data.category, price: data.price, duration: data.duration } : s));
-            setEditService(null);
-            toast.success(`Service "${data.name}" updated!`);
+          fields={formFields.map((f) => ({ ...f, defaultValue: String(editService[f.key as keyof Service] || "") }))}
+          onSubmit={async (data) => {
+            setLoading(true);
+            try {
+              const res = await fetch(`${API_URL}/api/services/${editService.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", "x-role": "admin" },
+                body: JSON.stringify(toPayload(data)),
+              });
+              const service = await res.json();
+              if (!res.ok) throw new Error(service.error || "Could not update service");
+              setServices((current) => current.map((s) => s.id === editService.id ? service : s));
+              setEditService(null);
+              toast.success(`Service "${data.name}" updated!`);
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Could not update service");
+            } finally {
+              setLoading(false);
+            }
           }}
           submitLabel="Save Changes"
         />
@@ -87,10 +140,24 @@ export default function Services() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
-              const svc = services.find((s) => s.id === deleteId);
-              setServices(services.filter((s) => s.id !== deleteId));
-              setDeleteId(null);
-              toast.success(`Service "${svc?.name}" deleted!`);
+              const removeService = async () => {
+                const svc = services.find((s) => s.id === deleteId);
+                try {
+                  const res = await fetch(`${API_URL}/api/services/${deleteId}`, {
+                    method: "DELETE",
+                    headers: { "x-role": "admin" },
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || "Could not delete service");
+                  setServices(services.filter((s) => s.id !== deleteId));
+                  toast.success(`Service "${svc?.name}" deleted!`);
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not delete service");
+                } finally {
+                  setDeleteId(null);
+                }
+              };
+              removeService();
             }}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -104,18 +171,32 @@ export default function Services() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((service) => (
-          <div key={service.id} className="bg-card rounded-xl border border-border p-5 shadow-card hover:shadow-card-hover transition-shadow">
+          <div key={service.id} className="bg-card overflow-hidden rounded-xl border border-border shadow-card hover:shadow-card-hover transition-shadow">
+            <div className="h-40 bg-muted">
+              <img
+                src={service.imageUrl || "/Hero_sec.png"}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(event) => { event.currentTarget.src = "/Hero_sec.png"; }}
+              />
+            </div>
+            <div className="p-5">
             <div className="flex items-start justify-between mb-3">
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent text-accent-foreground">{service.category}</span>
               <div className="flex gap-1">
-                <button onClick={() => setEditService(service)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                <button onClick={() => setDeleteId(service.id)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                <button disabled={loading} onClick={() => setEditService(service)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"><Pencil className="w-3.5 h-3.5" /></button>
+                <button disabled={loading} onClick={() => setDeleteId(service.id)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             </div>
             <h3 className="font-semibold text-foreground mb-2">{service.name}</h3>
+            <p className="mb-4 line-clamp-2 text-sm text-muted-foreground">{service.description || "Premium salon service"}</p>
             <div className="flex items-center justify-between">
               <span className="text-lg font-bold text-primary">Rs. {Number(service.price).toLocaleString()}</span>
-              <span className="text-xs text-muted-foreground">{service.duration} min</span>
+              <span className="text-xs text-muted-foreground">{service.durationMinutes} min</span>
+            </div>
+            {service.deposit > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">Deposit: Rs. {Number(service.deposit).toLocaleString()}</p>
+            )}
             </div>
           </div>
         ))}

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 interface FormField {
   key: string;
   label: string;
-  type?: "text" | "email" | "tel" | "number" | "select" | "textarea" | "date" | "time";
+  type?: "text" | "email" | "tel" | "number" | "select" | "textarea" | "date" | "time" | "url";
   placeholder?: string;
   options?: string[];
   required?: boolean;
