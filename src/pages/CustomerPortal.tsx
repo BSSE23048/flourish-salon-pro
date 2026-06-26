@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { io, Socket } from "socket.io-client";
-import { CalendarDays, Check, Clock, CreditCard, Scissors, Sparkles, UserRound, Users } from "lucide-react";
+import { Armchair, CalendarDays, Check, Clock, CreditCard, Menu, PlayCircle, Scissors, ShieldCheck, Sparkles, Star, UserRound, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -43,6 +42,29 @@ const steps = [
   { key: "confirm", label: "Confirm", icon: CreditCard },
 ];
 
+const heroHighlights = [
+  { title: "Expert Stylists", copy: "Trained Professionals", icon: UserRound },
+  { title: "Premium Products", copy: "Quality You Can Trust", icon: ShieldCheck },
+  { title: "On-Time Service", copy: "Your Time Matters", icon: Clock },
+];
+
+const heroStats = [
+  { value: "5+", label: "Years of Excellence", icon: Scissors },
+  { value: "2,500+", label: "Happy Clients", icon: Users },
+  { value: "4.9", label: "Client Rating", icon: Star },
+  { value: "15+", label: "Expert Stylists", icon: Armchair },
+];
+
+const navItems = [
+  { label: "Home", href: "#home" },
+  { label: "Services", href: "#services" },
+  { label: "About Us", href: "#about-us" },
+  { label: "Stylists", href: "#stylists" },
+  { label: "Gallery", href: "#gallery" },
+  { label: "Pricing", href: "#pricing" },
+  { label: "Contact", href: "#contact" },
+];
+
 function money(value: number) {
   return `Rs. ${value.toLocaleString()}`;
 }
@@ -64,10 +86,30 @@ export default function CustomerPortal() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [showBooking, setShowBooking] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const service = useMemo(() => services.find((item) => item.id === selectedService), [selectedService, services]);
   const artist = useMemo(() => staff.find((item) => item.id === selectedStaff), [selectedStaff, staff]);
   const activeStep = !selectedService ? 0 : !selectedStaff ? 1 : !selectedSlot ? 2 : 3;
+
+  const scrollToSection = (href: string) => {
+    window.setTimeout(() => {
+      document.querySelector(href)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  };
+
+  const handleNavClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+    event.preventDefault();
+    setShowBooking(false);
+    setMobileNavOpen(false);
+    scrollToSection(href);
+  };
+
+  const openBooking = () => {
+    setShowBooking(true);
+    setMobileNavOpen(false);
+    scrollToSection("#services");
+  };
 
   const fetchAvailability = useCallback(async () => {
     if (!selectedService || !selectedStaff || !selectedDate) return;
@@ -209,46 +251,140 @@ export default function CustomerPortal() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f2ea] text-[#231f1b]">
-      <section className="border-b border-[#decfbd] bg-[#fbf8f2]/90 backdrop-blur">
-        <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 lg:px-10">
-          <Link href="/" className="font-serif text-2xl font-semibold">Flourish</Link>
-          <nav className="flex items-center gap-4 text-sm text-[#6f6459]">
-            <Link href="/login?portal=staff" className="hover:text-[#231f1b]">Staff Login</Link>
-            <Link href="/login?portal=admin" className="hover:text-[#231f1b]">Admin Portal</Link>
-          </nav>
-        </header>
-        <div className="mx-auto grid min-h-[420px] max-w-7xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:px-10">
-          <div className="flex flex-col justify-center">
-            <Badge className="mb-5 w-fit bg-[#2f4f3f] text-white hover:bg-[#2f4f3f]">Premium salon booking</Badge>
-            <h1 className="font-serif text-5xl font-semibold leading-tight text-[#231f1b] md:text-6xl">
-              Flourish, booked beautifully.
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-[#6f6459]">
-              Choose your service, artist, and live available time. Holds, deposits, waitlist, and cutoff rules are enforced before your appointment is confirmed.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3 text-sm text-[#5c5045]">
-              <Button onClick={() => setShowBooking(true)} className="bg-[#2f4f3f] px-6 hover:bg-[#263f33]">Book an Appointment</Button>
-              <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">10 AM to 2 AM</span>
-              <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">2-hour booking cutoff</span>
-              <span className="rounded-full border border-[#decfbd] bg-white/70 px-4 py-2">4-hour cancellation policy</span>
+    <main className="min-h-screen bg-[#f9f5ef] text-[#071d21]">
+      <section id="home" className="relative isolate min-h-[820px] scroll-mt-28 overflow-hidden bg-[#f7f2ea] md:min-h-[760px]">
+        <div
+          className="absolute inset-0 bg-cover bg-[66%_center] md:bg-center"
+          style={{ backgroundImage: "url('/Hero_sec.png')" }}
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(249,247,243,0.98)_0%,rgba(249,247,243,0.9)_27%,rgba(249,247,243,0.38)_50%,rgba(249,247,243,0)_72%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#f9f5ef] via-[#f9f5ef]/70 to-transparent" />
+
+        <header className="fixed inset-x-0 top-4 z-50 px-4 md:px-8">
+          <div className="mx-auto flex max-w-[1660px] items-center justify-between rounded-full border border-white/55 bg-white/45 px-4 py-3 shadow-2xl shadow-[#092f31]/10 backdrop-blur-xl md:px-6">
+            <Link href="/" className="flex items-center gap-4">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#005a57] text-white shadow-lg shadow-[#005a57]/20 md:h-14 md:w-14">
+                <Scissors className="h-6 w-6 md:h-7 md:w-7" />
+              </span>
+              <span>
+                <span className="block text-lg font-black leading-none tracking-[-0.01em] text-[#071d21] md:text-2xl">Glamour Studio</span>
+                <span className="mt-1 hidden text-sm font-medium text-[#526066] sm:block md:text-base">Premium Men&apos;s Salon</span>
+              </span>
+            </Link>
+
+            <nav className="hidden items-center gap-10 text-sm font-semibold text-[#071d21] lg:flex">
+              {navItems.map((item, index) => (
+                <a key={item.href} href={item.href} onClick={(event) => handleNavClick(event, item.href)} className={index === 0 ? "border-b-2 border-[#005a57] pb-2 pt-2 text-[#005a57]" : "pb-2 pt-2 hover:text-[#005a57]"}>
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+
+            <div className="flex items-center gap-3">
+              <Button onClick={openBooking} className="hidden rounded-full border border-white/60 bg-[#005a57] px-6 py-6 text-white shadow-lg shadow-[#005a57]/20 hover:bg-[#004845] md:inline-flex">
+                Book Appointment
+                <CalendarDays className="h-5 w-5" />
+              </Button>
+              <Link href="/login?portal=admin" className="hidden text-sm font-semibold text-[#071d21] hover:text-[#005a57] md:block">Admin</Link>
+              <button
+                type="button"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#d7cdc2] bg-white/70 text-[#071d21] lg:hidden"
+                aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+                aria-expanded={mobileNavOpen}
+                onClick={() => setMobileNavOpen((open) => !open)}
+              >
+                {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </button>
             </div>
           </div>
-          <div className="relative min-h-[320px] overflow-hidden rounded-lg border border-[#decfbd] bg-[#231f1b] p-8 text-white shadow-2xl">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(190,132,84,0.35),transparent_35%),linear-gradient(135deg,rgba(47,79,63,0.55),rgba(35,31,27,0.95))]" />
-            <div className="relative flex h-full flex-col justify-between">
-              <Sparkles className="h-8 w-8 text-[#d6a76c]" />
-              <div>
-                <p className="text-sm uppercase tracking-[0.24em] text-[#d6c2a6]">Today’s mood</p>
-                <h2 className="mt-3 font-serif text-4xl">Quiet luxury, precise timing.</h2>
-              </div>
+          {mobileNavOpen && (
+            <div className="mx-auto mt-3 max-w-[1660px] rounded-3xl border border-white/60 bg-white/90 p-3 shadow-2xl shadow-[#092f31]/10 backdrop-blur-xl lg:hidden">
+              <nav className="grid gap-1 text-sm font-bold text-[#071d21]">
+                {navItems.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-2xl px-4 py-3 hover:bg-[#e5efed] hover:text-[#005a57]"
+                    onClick={(event) => handleNavClick(event, item.href)}
+                  >
+                    {item.label}
+                  </a>
+                ))}
+                <button
+                  type="button"
+                  className="mt-1 rounded-2xl bg-[#005a57] px-4 py-3 text-left text-white"
+                  onClick={openBooking}
+                >
+                  Book Appointment
+                </button>
+              </nav>
             </div>
+          )}
+        </header>
+
+        <div className="relative z-10 mx-auto flex max-w-[1660px] flex-col px-5 pb-10 pt-36 md:px-10 lg:pt-44 xl:px-16">
+          <div className="max-w-[660px] animate-fade-in">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#e5efed] px-4 py-2 text-sm font-semibold text-[#005a57]">
+              <Sparkles className="h-4 w-4" />
+              Premium Men&apos;s Grooming
+            </div>
+
+            <h1 className="mt-6 text-6xl font-black leading-[0.95] tracking-[-0.02em] text-[#071d21] md:text-7xl lg:text-8xl">
+              Sharp Style.
+              <span className="block">Confident You.</span>
+            </h1>
+
+            <p className="mt-8 max-w-[620px] text-lg font-medium leading-8 text-[#526066] md:text-xl">
+              Expert haircuts, beard grooming, and premium treatments crafted for the modern man.
+            </p>
+
+            <div className="mt-9 flex flex-col gap-4 sm:flex-row">
+              <Button onClick={openBooking} className="h-16 rounded-lg bg-[#005a57] px-8 text-base font-bold text-white shadow-xl shadow-[#005a57]/20 hover:bg-[#004845]">
+                <CalendarDays className="h-5 w-5" />
+                Book Your Appointment
+              </Button>
+              <Button variant="outline" onClick={() => {
+                setShowBooking(false);
+                scrollToSection("#services");
+              }} className="h-16 rounded-lg border-[#d7cdc2] bg-white/80 px-8 text-base font-bold text-[#071d21] hover:bg-white">
+                <PlayCircle className="h-5 w-5" />
+                View Services
+              </Button>
+            </div>
+
+            <div className="mt-10 grid max-w-[720px] grid-cols-1 gap-5 sm:grid-cols-3">
+              {heroHighlights.map((item) => (
+                <div key={item.title} className="flex items-center gap-4">
+                  <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[#e5efed] text-[#005a57]">
+                    <item.icon className="h-7 w-7" />
+                  </span>
+                  <span>
+                    <span className="block text-base font-black text-[#071d21]">{item.title}</span>
+                    <span className="mt-1 block text-sm font-medium text-[#526066]">{item.copy}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-10 grid gap-4 rounded-xl border border-[#ded7cf] bg-white/85 p-5 shadow-2xl shadow-[#6c5b4d]/10 backdrop-blur-md sm:grid-cols-2 lg:grid-cols-4 lg:p-7">
+            {heroStats.map((item, index) => (
+              <div key={item.label} className={`flex items-center gap-5 ${index > 0 ? "lg:border-l lg:border-[#ded7cf] lg:pl-12" : ""}`}>
+                <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#6ea097] text-white">
+                  <item.icon className="h-8 w-8" />
+                </span>
+                <span>
+                  <span className="block text-3xl font-black text-[#071d21]">{item.value}</span>
+                  <span className="block text-sm font-medium text-[#526066] md:text-base">{item.label}</span>
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
       {showBooking ? (
-      <section className="mx-auto max-w-7xl px-6 py-8 lg:px-10">
+      <section id="services" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-8 lg:px-10">
         <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
           {steps.map((step, index) => (
             <div key={step.key} className={`rounded-lg border px-4 py-3 ${index <= activeStep ? "border-[#b8794d] bg-white" : "border-[#decfbd] bg-white/50"}`}>
@@ -260,7 +396,7 @@ export default function CustomerPortal() {
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-6">
-            <section className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+            <section id="pricing" className="scroll-mt-28 rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
               <h2 className="mb-4 font-serif text-2xl">Select Service</h2>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {services.map((item) => (
@@ -286,7 +422,7 @@ export default function CustomerPortal() {
               </div>
             </section>
 
-            <section className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+            <section id="stylists" className="scroll-mt-28 rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
               <h2 className="mb-4 font-serif text-2xl">Select Staff</h2>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 {staff.map((item) => {
@@ -329,7 +465,7 @@ export default function CustomerPortal() {
             </section>
           </div>
 
-          <aside className="h-fit rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+          <aside id="contact" className="h-fit scroll-mt-28 rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
             <h2 className="font-serif text-2xl">Confirm</h2>
             <div className="mt-4 space-y-3 text-sm">
               <p><span className="text-[#6f6459]">Service:</span> {service?.name || "Choose service"}</p>
@@ -351,7 +487,7 @@ export default function CustomerPortal() {
         </div>
       </section>
       ) : (
-        <section className="mx-auto max-w-7xl px-6 py-12 lg:px-10">
+        <section id="services" className="mx-auto max-w-7xl scroll-mt-28 px-6 py-12 lg:px-10">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {["Live artist availability", "Deposit-protected booking", "Easy reschedule policy"].map((item) => (
               <div key={item} className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
@@ -359,6 +495,36 @@ export default function CustomerPortal() {
                 <p className="mt-3 text-sm leading-6 text-[#6f6459]">A calm, premium salon flow built for real operating hours and real staff schedules.</p>
               </div>
             ))}
+          </div>
+          <div id="about-us" className="scroll-mt-28 pt-10">
+            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+              <p className="font-serif text-2xl">About Glamour Studio</p>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-[#6f6459]">Premium grooming, precise appointments, and dependable salon service for clients who want a polished experience from booking to checkout.</p>
+            </div>
+          </div>
+          <div id="stylists" className="scroll-mt-28 pt-10">
+            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+              <p className="font-serif text-2xl">Stylists</p>
+              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Choose a specialist during booking and see live availability before confirming your visit.</p>
+            </div>
+          </div>
+          <div id="gallery" className="scroll-mt-28 pt-10">
+            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+              <p className="font-serif text-2xl">Gallery</p>
+              <p className="mt-3 text-sm leading-6 text-[#6f6459]">A polished men&apos;s salon atmosphere with premium finishes, sharp cuts, and tailored grooming.</p>
+            </div>
+          </div>
+          <div id="pricing" className="scroll-mt-28 pt-10">
+            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+              <p className="font-serif text-2xl">Pricing</p>
+              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Service pricing and deposits are shown inside the appointment flow before you confirm.</p>
+            </div>
+          </div>
+          <div id="contact" className="scroll-mt-28 pt-10">
+            <div className="rounded-lg border border-[#decfbd] bg-white p-6 shadow-sm">
+              <p className="font-serif text-2xl">Contact</p>
+              <p className="mt-3 text-sm leading-6 text-[#6f6459]">Book online anytime, or use the client flow to choose the service, stylist, and appointment slot that suits you.</p>
+            </div>
           </div>
         </section>
       )}
