@@ -3,7 +3,7 @@ import { Banknote, CreditCard, Download, Plus, Receipt, Smartphone, Trash2 } fro
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL } from "@/lib/api";
@@ -193,7 +193,10 @@ export default function Billing() {
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Create Invoice</DialogTitle>
+            <DialogDescription>Add service lines, staff assignments, discounts, and payment details.</DialogDescription>
+          </DialogHeader>
           <div className="grid gap-4 md:grid-cols-3">
             <Input placeholder="Customer name" value={customer} onChange={(event) => setCustomer(event.target.value)} />
             <Select value={payment} onValueChange={setPayment}>

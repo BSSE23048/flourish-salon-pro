@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import DataTable, { StatusBadge, AppointmentStatus } from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { toast } from "sonner";
@@ -144,7 +144,10 @@ export default function Appointments() {
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent>
-          <DialogHeader><DialogTitle>New Appointment</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>New Appointment</DialogTitle>
+            <DialogDescription>Create an appointment linked to a customer, service, staff member, and time.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Customer name" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} />
             <Input type="email" placeholder="Customer email" value={form.customerEmail} onChange={(event) => setForm({ ...form, customerEmail: event.target.value })} />
