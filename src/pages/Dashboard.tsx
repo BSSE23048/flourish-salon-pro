@@ -334,7 +334,7 @@ export default function Dashboard() {
         <DataTable
           columns={[
             { key: "time", label: "Time" },
-            { key: "customer", label: "Customer" },
+            { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer as string}</span> },
             { key: "service", label: "Service" },
             { key: "staff", label: "Staff" },
             { key: "status", label: "Status", render: (row) => <StatusBadge status={row.displayStatus} /> },

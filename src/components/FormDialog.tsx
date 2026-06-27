@@ -14,18 +14,28 @@ interface FormField {
   required?: boolean;
   defaultValue?: string;
   accept?: string;
+  hint?: string;
 }
 
 interface FormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
+  description?: string;
   fields: FormField[];
   onSubmit: (data: Record<string, string>) => void;
   submitLabel?: string;
 }
 
-export default function FormDialog({ open, onOpenChange, title, fields, onSubmit, submitLabel = "Save" }: FormDialogProps) {
+export default function FormDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  fields,
+  onSubmit,
+  submitLabel = "Save",
+}: FormDialogProps) {
   const initialValues = useMemo(() => {
     const init: Record<string, string> = {};
     fields.forEach((f) => { init[f.key] = f.defaultValue || ""; });
@@ -35,15 +45,12 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
   const [values, setValues] = useState<Record<string, string>>(initialValues);
 
   useEffect(() => {
-    if (open) {
-      setValues(initialValues);
-    }
+    if (open) setValues(initialValues);
   }, [initialValues, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmit(values);
-    // Reset
     setValues(initialValues);
     onOpenChange(false);
   };
@@ -53,7 +60,6 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
       setValues({ ...values, [fieldKey]: "" });
       return;
     }
-
     const reader = new FileReader();
     reader.onload = () => {
       setValues((current) => ({ ...current, [fieldKey]: String(reader.result || "") }));
@@ -61,22 +67,39 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
     reader.readAsDataURL(file);
   };
 
+  const set = (key: string, val: string) => setValues((v) => ({ ...v, [key]: val }));
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">
-            Complete the form fields and submit to save changes.
-          </DialogDescription>
+      <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-xl">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="font-editorial text-2xl font-normal text-foreground tracking-tight">
+            {title}
+          </DialogTitle>
+          {description ? (
+            <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
+              {description}
+            </DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">
+              Complete the form and submit to save changes.
+            </DialogDescription>
+          )}
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="mt-2 max-h-[calc(90vh-9rem)] space-y-4 overflow-y-auto pr-1">
+
+        <form onSubmit={handleSubmit} className="mt-1 max-h-[calc(90vh-11rem)] space-y-5 overflow-y-auto pr-1">
           {fields.map((field) => (
-            <div key={field.key}>
-              <label className="text-sm font-medium text-foreground mb-1.5 block">{field.label}</label>
+            <div key={field.key} className="space-y-2">
+              <label className="text-sm font-medium text-foreground block leading-none">
+                {field.label}
+                {field.required && <span className="text-destructive ml-1">*</span>}
+              </label>
+
               {field.type === "select" ? (
-                <Select value={values[field.key]} onValueChange={(v) => setValues({ ...values, [field.key]: v })}>
-                  <SelectTrigger><SelectValue placeholder={field.placeholder || `Select ${field.label}`} /></SelectTrigger>
+                <Select value={values[field.key]} onValueChange={(v) => set(field.key, v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={field.placeholder || `Select ${field.label}`} />
+                  </SelectTrigger>
                   <SelectContent>
                     {field.options?.map((opt) => (
                       <SelectItem key={opt} value={opt}>{opt}</SelectItem>
@@ -86,7 +109,7 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
               ) : field.type === "textarea" ? (
                 <Textarea
                   value={values[field.key]}
-                  onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+                  onChange={(e) => set(field.key, e.target.value)}
                   placeholder={field.placeholder}
                   required={field.required}
                 />
@@ -99,22 +122,38 @@ export default function FormDialog({ open, onOpenChange, title, fields, onSubmit
                     required={field.required && !values[field.key]}
                   />
                   {values[field.key] && (
-                    <img src={values[field.key]} alt="" className="h-28 w-full rounded-md border object-cover" />
+                    <img
+                      src={values[field.key]}
+                      alt=""
+                      className="h-28 w-full rounded-xl border object-cover"
+                    />
                   )}
                 </div>
               ) : (
                 <Input
                   type={field.type || "text"}
                   value={values[field.key]}
-                  onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+                  onChange={(e) => set(field.key, e.target.value)}
                   placeholder={field.placeholder}
                   required={field.required}
                 />
               )}
+
+              {field.hint && (
+                <p className="text-xs text-muted-foreground">{field.hint}</p>
+              )}
             </div>
           ))}
-          <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 bg-background/95 px-1 pb-1 pt-3 backdrop-blur">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+
+          {/* Sticky footer */}
+          <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 bg-popover/95 px-1 pb-1 pt-4 backdrop-blur border-t border-border mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
             <Button type="submit">{submitLabel}</Button>
           </div>
         </form>
