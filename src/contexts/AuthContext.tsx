@@ -79,10 +79,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const storedDemo = typeof window !== "undefined" ? window.localStorage.getItem(DEMO_STORAGE_KEY) : null;
     if (storedDemo) {
-      const { email, fullName, role } = JSON.parse(storedDemo) as { email: string; fullName: string; role?: AppRole };
-      setDemoSession(email, fullName, role || "owner");
-      setLoading(false);
-      return;
+      try {
+        const { email, fullName, role } = JSON.parse(storedDemo) as { email: string; fullName: string; role?: AppRole };
+        setDemoSession(email, fullName, role || "owner");
+        setLoading(false);
+        return;
+      } catch {
+        window.localStorage.removeItem(DEMO_STORAGE_KEY);
+      }
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {

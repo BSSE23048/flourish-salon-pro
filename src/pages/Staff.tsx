@@ -4,7 +4,7 @@ import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL } from "@/lib/api";
@@ -236,7 +236,10 @@ export default function Staff() {
         }
       }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{editing ? "Edit Staff" : "Add Staff"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Staff" : "Add Staff"}</DialogTitle>
+            <DialogDescription>Enter staff profile, salary, commission, and the security PIN.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <Input placeholder="Role / title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -255,7 +258,10 @@ export default function Staff() {
 
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Delete Staff</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Delete Staff</DialogTitle>
+            <DialogDescription>Confirm staff deletion with the security PIN.</DialogDescription>
+          </DialogHeader>
           <p className="text-sm text-muted-foreground">Enter PIN 1234 to delete {deleteTarget?.name}. Existing linked attendance and appointments for this staff member will be removed from the demo data.</p>
           <Input type="password" placeholder="Security PIN" value={deletePin} onChange={(e) => setDeletePin(e.target.value)} />
           <div className="flex justify-end gap-2">

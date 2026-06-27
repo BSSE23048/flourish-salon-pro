@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
@@ -219,7 +219,10 @@ export default function Payroll() {
 
       <Dialog open={Boolean(adjusting)} onOpenChange={(open) => !open && setAdjusting(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{adjustment.type === "deduction" ? "Add Deduction / Penalty" : "Add Bonus"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{adjustment.type === "deduction" ? "Add Deduction / Penalty" : "Add Bonus"}</DialogTitle>
+            <DialogDescription>Adjust the selected staff member&apos;s payroll for this month.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <Select value={adjustment.type} onValueChange={(value) => setAdjustment({ ...adjustment, type: value })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
