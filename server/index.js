@@ -9,7 +9,7 @@ const port = process.env.PORT || 4000;
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
 
 const io = new Server(server, {
-  cors: { origin: clientOrigin, methods: ["GET", "POST", "PATCH"] },
+  cors: { origin: clientOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
 });
 
 app.use(cors({ origin: clientOrigin }));
@@ -34,9 +34,9 @@ const services = [
 ];
 
 const staff = [
-  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, status: "online", bio: "Editorial cuts, soft color, and quiet luxury finishes." },
-  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, status: "online", bio: "Glow-focused facials and camera-ready makeup." },
-  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, status: "online", bio: "Detail-led treatments with calm, precise timing." },
+  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, baseSalary: 65000, status: "online", bio: "Editorial cuts, soft color, and quiet luxury finishes." },
+  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, baseSalary: 52000, status: "online", bio: "Glow-focused facials and camera-ready makeup." },
+  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, baseSalary: 45000, status: "online", bio: "Detail-led treatments with calm, precise timing." },
 ];
 
 const state = {
@@ -82,8 +82,24 @@ const state = {
     { id: 2, item: "Keratin Kit", stock: 14, reorderAt: 6, vendor: "SalonPro" },
   ],
   invoices: [
-    { id: "INV-1042", date: today(), customer: "Ayesha Khan", total: 3500, payment: "Cash", status: "Paid" },
+    {
+      id: "INV-1042",
+      date: today(),
+      customer: "Ayesha Khan",
+      payment: "Cash",
+      status: "Paid",
+      items: [
+        { serviceId: "svc-haircut", name: "Signature Haircut", staffId: "stf-sara", quantity: 1, unitPrice: 3500, total: 3500, custom: false },
+      ],
+      subtotal: 3500,
+      discount: 0,
+      total: 3500,
+      createdAt: new Date().toISOString(),
+    },
   ],
+  leaveRequests: [],
+  payroll: [],
+  payrollAdjustments: [],
 };
 
 const plans = [
@@ -107,6 +123,15 @@ function requireRole(...roles) {
 
 function staffFromRequest(req) {
   return req.header("x-staff-id") || "stf-sara";
+}
+
+function verifyPin(req, res) {
+  const pin = String(req.body?.pin || req.header("x-pin") || "");
+  if (pin !== "1234") {
+    res.status(403).json({ error: "Security PIN is required for staff changes" });
+    return false;
+  }
+  return true;
 }
 
 function getService(serviceId) {
@@ -141,6 +166,159 @@ function isStaffBookable(staffId) {
 
 function attendanceFor(staffId, date = today()) {
   return state.attendance.find((entry) => entry.staffId === staffId && entry.date === date);
+}
+
+function monthKey(value = today()) {
+  return String(value).slice(0, 7);
+}
+
+function daysInMonth(month = monthKey()) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(year, monthNumber, 0).getDate();
+}
+
+function workingDaysElapsed(month = monthKey()) {
+  const currentMonth = monthKey(today());
+  return month === currentMonth ? Number(today().slice(8, 10)) : daysInMonth(month);
+}
+
+function staffAttendancePercentage(staffId, month = monthKey()) {
+  const totalDays = workingDaysElapsed(month);
+  const presentDays = state.attendance.filter((entry) =>
+    entry.staffId === staffId &&
+    entry.date.startsWith(month) &&
+    ["present", "half_day", "clocked_in", "clocked_out"].includes(entry.status)
+  ).reduce((sum, entry) => sum + (entry.status === "half_day" ? 0.5 : 1), 0);
+  return totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+}
+
+function normalizeStaffPayload(input, existing = {}) {
+  return {
+    ...existing,
+    name: String(input.name ?? existing.name ?? "").trim(),
+    title: String(input.title ?? existing.title ?? "").trim(),
+    specialties: Array.isArray(input.specialties)
+      ? input.specialties.map(String).filter(Boolean)
+      : String(input.specialties ?? existing.specialties?.join(",") ?? "Hair").split(",").map((item) => item.trim()).filter(Boolean),
+    commissionRate: Math.max(0, Number(input.commissionRate ?? existing.commissionRate ?? 0) || 0),
+    baseSalary: Math.max(0, Number(input.baseSalary ?? existing.baseSalary ?? 0) || 0),
+    status: input.status || existing.status || "online",
+    bio: String(input.bio ?? existing.bio ?? "").trim(),
+  };
+}
+
+function invoiceCommissions(month = monthKey()) {
+  const totals = Object.fromEntries(staff.map((member) => [member.id, { revenue: 0, commission: 0, invoices: 0 }]));
+  for (const invoice of state.invoices) {
+    if (!String(invoice.date).startsWith(month) || invoice.status !== "Paid") continue;
+    for (const item of invoice.items || []) {
+      const staffMember = getStaffMember(item.staffId);
+      if (!staffMember) continue;
+      const lineTotal = Number(item.total || 0);
+      totals[staffMember.id].revenue += lineTotal;
+      totals[staffMember.id].commission += Math.round(lineTotal * (Number(staffMember.commissionRate || 0) / 100));
+      totals[staffMember.id].invoices += 1;
+    }
+  }
+  return staff.map((member) => ({
+    staffId: member.id,
+    name: member.name,
+    title: member.title,
+    commissionRate: member.commissionRate,
+    revenue: totals[member.id]?.revenue || 0,
+    commission: totals[member.id]?.commission || 0,
+    invoices: totals[member.id]?.invoices || 0,
+    attendancePercentage: staffAttendancePercentage(member.id, month),
+  }));
+}
+
+function payrollRecordFor(staffId, month = monthKey()) {
+  let record = state.payroll.find((item) => item.staffId === staffId && item.month === month);
+  if (!record) {
+    record = { staffId, month, paid: false, paidAt: null, updatedAt: new Date().toISOString() };
+    state.payroll.push(record);
+  }
+  return record;
+}
+
+function payrollRows(month = monthKey()) {
+  const commissionMap = Object.fromEntries(invoiceCommissions(month).map((item) => [item.staffId, item]));
+  return staff.map((member) => {
+    const record = payrollRecordFor(member.id, month);
+    const adjustments = state.payrollAdjustments.filter((item) => item.staffId === member.id && item.month === month);
+    const deductions = adjustments.filter((item) => item.type === "deduction").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const bonuses = adjustments.filter((item) => item.type === "bonus").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const commission = commissionMap[member.id]?.commission || 0;
+    const revenue = commissionMap[member.id]?.revenue || 0;
+    const baseSalary = Number(member.baseSalary || 0);
+    return {
+      staffId: member.id,
+      name: member.name,
+      title: member.title,
+      month,
+      baseSalary,
+      commission,
+      revenue,
+      deductions,
+      bonuses,
+      payable: Math.max(0, baseSalary + commission + bonuses - deductions),
+      paid: Boolean(record.paid),
+      paidAt: record.paidAt,
+      adjustments,
+      attendancePercentage: staffAttendancePercentage(member.id, month),
+    };
+  });
+}
+
+function financialSummary(month = monthKey()) {
+  const invoices = state.invoices.filter((invoice) => String(invoice.date).startsWith(month) && invoice.status === "Paid");
+  const grossRevenue = invoices.reduce((sum, invoice) => sum + Number(invoice.subtotal || invoice.total || 0), 0);
+  const discounts = invoices.reduce((sum, invoice) => sum + Number(invoice.discount || 0), 0);
+  const netRevenue = invoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const payroll = payrollRows(month);
+  const payrollPayable = payroll.reduce((sum, row) => sum + row.payable, 0);
+  const payrollPaid = payroll.filter((row) => row.paid).reduce((sum, row) => sum + row.payable, 0);
+  return {
+    month,
+    grossRevenue,
+    discounts,
+    netRevenue,
+    payrollPayable,
+    payrollPaid,
+    payrollUnpaid: payrollPayable - payrollPaid,
+    profitAfterPayroll: netRevenue - payrollPayable,
+    invoiceCount: invoices.length,
+  };
+}
+
+function normalizeInvoicePayload(input) {
+  const items = Array.isArray(input.items) ? input.items : [];
+  const normalizedItems = items.map((item) => {
+    const service = item.serviceId && item.serviceId !== "other" ? getService(item.serviceId) : null;
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const unitPrice = Math.max(0, Number(item.unitPrice ?? service?.price ?? 0));
+    const name = String(item.name || service?.name || "Other service").trim();
+    return {
+      serviceId: service?.id || "other",
+      name,
+      staffId: item.staffId,
+      quantity,
+      unitPrice,
+      total: quantity * unitPrice,
+      custom: !service,
+    };
+  }).filter((item) => item.name && item.staffId && item.total >= 0);
+  const subtotal = normalizedItems.reduce((sum, item) => sum + item.total, 0);
+  const discount = Math.max(0, Number(input.discount || 0));
+  return {
+    customer: String(input.customer || "").trim(),
+    payment: String(input.payment || "Cash"),
+    status: String(input.status || "Paid"),
+    items: normalizedItems,
+    subtotal,
+    discount,
+    total: Math.max(0, subtotal - discount),
+  };
 }
 
 function atBusinessTime(date, hour, minute = 0) {
@@ -315,7 +493,50 @@ app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
 });
 app.get("/api/staff", (req, res) => {
   const includeUnavailable = req.query.includeUnavailable === "true" || ["admin", "staff"].includes(roleFromRequest(req));
-  res.json(includeUnavailable ? staff : staff.filter((member) => member.status === "online"));
+  const month = req.query.month || monthKey();
+  const commissionMap = Object.fromEntries(invoiceCommissions(month).map((item) => [item.staffId, item]));
+  const payrollMap = Object.fromEntries(payrollRows(month).map((item) => [item.staffId, item]));
+  const rows = staff.map((member) => ({
+    ...member,
+    monthlyRevenue: commissionMap[member.id]?.revenue || 0,
+    monthlyCommission: commissionMap[member.id]?.commission || 0,
+    attendancePercentage: commissionMap[member.id]?.attendancePercentage || 0,
+    monthlyPayable: payrollMap[member.id]?.payable || 0,
+  }));
+  res.json(includeUnavailable ? rows : rows.filter((member) => member.status === "online"));
+});
+
+app.post("/api/staff", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res)) return;
+  const payload = normalizeStaffPayload(req.body);
+  if (!payload.name) return res.status(400).json({ error: "Staff name is required" });
+  const member = { id: `stf-${Date.now()}-${Math.random().toString(16).slice(2)}`, ...payload };
+  staff.push(member);
+  io.emit("staff:update", member);
+  res.status(201).json(member);
+});
+
+app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res)) return;
+  const index = staff.findIndex((member) => member.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Staff member not found" });
+  const member = normalizeStaffPayload(req.body, staff[index]);
+  if (!member.name) return res.status(400).json({ error: "Staff name is required" });
+  staff[index] = member;
+  io.emit("staff:update", member);
+  res.json(member);
+});
+
+app.delete("/api/staff/:id", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res)) return;
+  const index = staff.findIndex((member) => member.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Staff member not found" });
+  const [removed] = staff.splice(index, 1);
+  state.appointments = state.appointments.filter((appointment) => appointment.staffId !== removed.id);
+  state.attendance = state.attendance.filter((entry) => entry.staffId !== removed.id);
+  io.emit("staff:update", removed);
+  io.emit("appointments:update", state.appointments);
+  res.json(removed);
 });
 
 app.get("/api/availability", (req, res) => {
@@ -396,6 +617,7 @@ app.post("/api/bookings", (req, res) => {
   state.appointments.unshift(appointment);
   if (hold) hold.status = "converted";
   emitSchedule(staffId, appointment.startAt.slice(0, 10));
+  io.emit("appointments:update", state.appointments);
   res.status(201).json({
     appointment,
     payment: {
@@ -431,6 +653,31 @@ app.get("/api/appointments", requireRole("admin", "staff"), (req, res) => {
   res.json(state.appointments);
 });
 
+app.post("/api/appointments", requireRole("admin"), (req, res) => {
+  const service = getService(req.body.serviceId);
+  const staffMember = getStaffMember(req.body.staffId);
+  if (!service) return res.status(404).json({ error: "Service not found" });
+  if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
+  const start = req.body.startAt ? new Date(req.body.startAt) : parseBusinessStart(req.body.date || today(), req.body.time || "10:00");
+  const end = new Date(start.getTime() + minutes(service.durationMinutes));
+  const conflict = findConflict({ staffId: staffMember.id, startAt: start, endAt: end });
+  if (conflict) return res.status(409).json({ error: "That staff member is already booked at this time." });
+  const appointment = makeAppointment({
+    customerName: req.body.customerName,
+    customerEmail: req.body.customerEmail || "",
+    staffId: staffMember.id,
+    serviceId: service.id,
+    startAt: start.toISOString(),
+    status: req.body.status || "booked",
+    depositPaid: Boolean(req.body.depositPaid),
+    notes: req.body.notes,
+  });
+  state.appointments.unshift(appointment);
+  emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
+  io.emit("appointments:update", state.appointments);
+  res.status(201).json(appointment);
+});
+
 app.patch("/api/appointments/:id/status", requireRole("admin", "staff"), (req, res) => {
   const appointment = state.appointments.find((item) => item.id === req.params.id);
   if (!appointment) return res.status(404).json({ error: "Appointment not found" });
@@ -442,6 +689,7 @@ app.patch("/api/appointments/:id/status", requireRole("admin", "staff"), (req, r
   appointment.status = req.body.status;
   appointment.updatedAt = new Date().toISOString();
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
+  io.emit("appointments:update", state.appointments);
   res.json(appointment);
 });
 
@@ -455,6 +703,7 @@ app.patch("/api/appointments/:id/cancel", (req, res) => {
   appointment.updatedAt = new Date().toISOString();
   notifyWaitlist(appointment);
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
+  io.emit("appointments:update", state.appointments);
   res.json({ appointment, waitlistNotification: "Next waitlisted customer has been notified if one exists." });
 });
 
@@ -470,23 +719,24 @@ app.get("/api/staff/me/schedule", requireRole("staff", "admin"), (req, res) => {
     appointment.staffId === staffId && appointment.startAt.slice(0, 10) === date
   );
   const serviceMap = Object.fromEntries(services.map((service) => [service.id, service]));
-  const revenue = appointments.reduce((sum, appointment) => sum + (serviceMap[appointment.serviceId]?.price || 0), 0);
   const staffMember = staff.find((item) => item.id === staffId);
+  const commission = invoiceCommissions(monthKey(date)).find((item) => item.staffId === staffId);
+  const payroll = payrollRows(monthKey(date)).find((item) => item.staffId === staffId);
   res.json({
     staff: staffMember,
     date,
-    appointments,
+    appointments: appointments.map((appointment) => ({ ...appointment, serviceName: serviceMap[appointment.serviceId]?.name || "Service" })),
     attendance: attendanceFor(staffId, date) || null,
-    commission: Math.round(revenue * ((staffMember?.commissionRate || 0) / 100)),
+    attendancePercentage: staffAttendancePercentage(staffId, monthKey(date)),
+    commission: commission?.commission || 0,
+    revenue: commission?.revenue || 0,
+    payroll,
   });
 });
 
-app.patch("/api/staff/:id/status", requireRole("admin", "staff"), (req, res) => {
+app.patch("/api/staff/:id/status", requireRole("admin"), (req, res) => {
   const staffMember = getStaffMember(req.params.id);
   if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
-  if (roleFromRequest(req) === "staff" && staffMember.id !== staffFromRequest(req)) {
-    return res.status(403).json({ error: "Staff can only update their own availability" });
-  }
   const allowed = ["online", "offline_today", "on_leave"];
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
   staffMember.status = req.body.status;
@@ -494,30 +744,31 @@ app.patch("/api/staff/:id/status", requireRole("admin", "staff"), (req, res) => 
   res.json(staffMember);
 });
 
-app.post("/api/staff/me/clock-in", requireRole("staff", "admin"), (req, res) => {
+app.post("/api/staff/me/leave", requireRole("staff", "admin"), (req, res) => {
   const staffId = staffFromRequest(req);
-  const date = today();
-  let entry = attendanceFor(staffId, date);
-  if (!entry) {
-    entry = { id: `att-${Date.now()}`, staffId, date, clockInAt: new Date().toISOString(), clockOutAt: null, status: "clocked_in" };
-    state.attendance.push(entry);
-  } else if (!entry.clockInAt) {
-    entry.clockInAt = new Date().toISOString();
-    entry.status = "clocked_in";
-  }
-  io.emit("attendance:update", attendanceSummary(date));
-  res.status(201).json(entry);
+  const request = {
+    id: `leave-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    staffId,
+    fromDate: req.body.fromDate,
+    toDate: req.body.toDate || req.body.fromDate,
+    reason: String(req.body.reason || "").trim(),
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+  state.leaveRequests.unshift(request);
+  io.emit("leave:update", request);
+  res.status(201).json(request);
 });
 
-app.post("/api/staff/me/clock-out", requireRole("staff", "admin"), (req, res) => {
+app.get("/api/staff/me/attendance", requireRole("staff", "admin"), (req, res) => {
   const staffId = staffFromRequest(req);
-  const date = today();
-  const entry = attendanceFor(staffId, date);
-  if (!entry?.clockInAt) return res.status(422).json({ error: "Clock in before clocking out" });
-  entry.clockOutAt = new Date().toISOString();
-  entry.status = "clocked_out";
-  io.emit("attendance:update", attendanceSummary(date));
-  res.json(entry);
+  const month = req.query.month || monthKey();
+  res.json({
+    month,
+    percentage: staffAttendancePercentage(staffId, month),
+    rows: state.attendance.filter((entry) => entry.staffId === staffId && entry.date.startsWith(month)),
+    leaveRequests: state.leaveRequests.filter((entry) => entry.staffId === staffId && String(entry.fromDate).startsWith(month)),
+  });
 });
 
 function attendanceSummary(date = today()) {
@@ -531,12 +782,76 @@ function attendanceSummary(date = today()) {
       attendanceStatus: entry?.status || (member.status === "online" ? "absent" : member.status),
       clockInAt: entry?.clockInAt || null,
       clockOutAt: entry?.clockOutAt || null,
+      attendancePercentage: staffAttendancePercentage(member.id, monthKey(date)),
     };
   });
 }
 
 app.get("/api/admin/attendance", requireRole("admin"), (req, res) => {
-  res.json({ date: req.query.date || today(), staff: attendanceSummary(req.query.date || today()) });
+  const date = req.query.date || today();
+  const month = req.query.month || monthKey(date);
+  res.json({
+    date,
+    month,
+    staff: attendanceSummary(date),
+    monthly: staff.map((member) => ({
+      staffId: member.id,
+      name: member.name,
+      percentage: staffAttendancePercentage(member.id, month),
+      rows: state.attendance.filter((entry) => entry.staffId === member.id && entry.date.startsWith(month)),
+    })),
+    leaveRequests: state.leaveRequests,
+  });
+});
+
+app.post("/api/admin/attendance", requireRole("admin"), (req, res) => {
+  const { staffId, date = today(), status = "present" } = req.body;
+  if (!getStaffMember(staffId)) return res.status(404).json({ error: "Staff member not found" });
+  const allowed = ["present", "absent", "half_day", "paid_leave", "unpaid_leave"];
+  if (!allowed.includes(status)) return res.status(422).json({ error: "Invalid attendance status" });
+  let entry = attendanceFor(staffId, date);
+  if (!entry) {
+    entry = { id: `att-${Date.now()}-${Math.random().toString(16).slice(2)}`, staffId, date, clockInAt: null, clockOutAt: null, status };
+    state.attendance.push(entry);
+  }
+  entry.status = status;
+  entry.clockInAt = req.body.clockInAt || null;
+  entry.clockOutAt = req.body.clockOutAt || null;
+  entry.markedBy = "admin";
+  entry.updatedAt = new Date().toISOString();
+  io.emit("attendance:update", attendanceSummary(date));
+  res.status(201).json(entry);
+});
+
+app.get("/api/admin/leave-requests", requireRole("admin"), (_req, res) => {
+  res.json(state.leaveRequests);
+});
+
+app.patch("/api/admin/leave-requests/:id", requireRole("admin"), (req, res) => {
+  const request = state.leaveRequests.find((entry) => entry.id === req.params.id);
+  if (!request) return res.status(404).json({ error: "Leave request not found" });
+  const allowed = ["approved", "rejected"];
+  if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid leave status" });
+  request.status = req.body.status;
+  request.reviewedAt = new Date().toISOString();
+  if (request.status === "approved") {
+    let cursor = new Date(`${request.fromDate}T00:00:00`);
+    const end = new Date(`${request.toDate}T00:00:00`);
+    while (cursor <= end) {
+      const date = cursor.toISOString().slice(0, 10);
+      let entry = attendanceFor(request.staffId, date);
+      if (!entry) {
+        entry = { id: `att-${Date.now()}-${Math.random().toString(16).slice(2)}`, staffId: request.staffId, date, clockInAt: null, clockOutAt: null, status: "paid_leave" };
+        state.attendance.push(entry);
+      } else {
+        entry.status = "paid_leave";
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  io.emit("leave:update", request);
+  io.emit("attendance:update", attendanceSummary(request.fromDate));
+  res.json(request);
 });
 
 app.get("/api/metrics", requireRole("admin"), (_req, res) => {
@@ -558,7 +873,81 @@ app.get("/api/metrics", requireRole("admin"), (_req, res) => {
 
 app.get("/api/customers", requireRole("admin"), (_req, res) => res.json(state.customers));
 app.get("/api/inventory", requireRole("admin"), (_req, res) => res.json(state.inventory));
+app.get("/api/staff/commission", requireRole("admin", "staff"), (req, res) => {
+  const month = req.query.month || monthKey();
+  const rows = invoiceCommissions(month);
+  if (roleFromRequest(req) === "staff") {
+    return res.json(rows.filter((row) => row.staffId === staffFromRequest(req)));
+  }
+  res.json(rows);
+});
+app.get("/api/payroll", requireRole("admin", "staff"), (req, res) => {
+  const month = req.query.month || monthKey();
+  const rows = payrollRows(month);
+  if (roleFromRequest(req) === "staff") {
+    return res.json({ month, rows: rows.filter((row) => row.staffId === staffFromRequest(req)), summary: financialSummary(month) });
+  }
+  res.json({ month, rows, summary: financialSummary(month) });
+});
+app.patch("/api/payroll/:staffId/status", requireRole("admin"), (req, res) => {
+  const staffMember = getStaffMember(req.params.staffId);
+  if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
+  const month = req.body.month || monthKey();
+  const record = payrollRecordFor(staffMember.id, month);
+  record.paid = Boolean(req.body.paid);
+  record.paidAt = record.paid ? new Date().toISOString() : null;
+  record.updatedAt = new Date().toISOString();
+  io.emit("payroll:update", payrollRows(month));
+  res.json(payrollRows(month).find((row) => row.staffId === staffMember.id));
+});
+app.post("/api/payroll/adjustments", requireRole("admin"), (req, res) => {
+  const staffMember = getStaffMember(req.body.staffId);
+  if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
+  const type = req.body.type === "bonus" ? "bonus" : "deduction";
+  const amount = Math.max(0, Number(req.body.amount || 0));
+  if (amount <= 0) return res.status(400).json({ error: "Adjustment amount is required" });
+  const adjustment = {
+    id: `adj-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    staffId: staffMember.id,
+    month: req.body.month || monthKey(),
+    type,
+    amount,
+    reason: String(req.body.reason || "").trim(),
+    createdAt: new Date().toISOString(),
+  };
+  state.payrollAdjustments.unshift(adjustment);
+  io.emit("payroll:update", payrollRows(adjustment.month));
+  res.status(201).json(adjustment);
+});
+app.delete("/api/payroll/adjustments/:id", requireRole("admin"), (req, res) => {
+  const index = state.payrollAdjustments.findIndex((item) => item.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Adjustment not found" });
+  const [removed] = state.payrollAdjustments.splice(index, 1);
+  io.emit("payroll:update", payrollRows(removed.month));
+  res.json(removed);
+});
+app.get("/api/financials", requireRole("admin"), (req, res) => {
+  res.json(financialSummary(req.query.month || monthKey()));
+});
 app.get("/api/invoices", requireRole("admin"), (_req, res) => res.json(state.invoices));
+app.post("/api/invoices", requireRole("admin"), (req, res) => {
+  const payload = normalizeInvoicePayload(req.body);
+  if (!payload.customer) return res.status(400).json({ error: "Customer name is required" });
+  if (payload.items.length === 0) return res.status(400).json({ error: "Add at least one service line" });
+  for (const item of payload.items) {
+    if (!getStaffMember(item.staffId)) return res.status(404).json({ error: `Staff member not found for ${item.name}` });
+  }
+  const invoice = {
+    id: `INV-${Date.now().toString().slice(-6)}`,
+    date: req.body.date || today(),
+    ...payload,
+    createdAt: new Date().toISOString(),
+  };
+  state.invoices.unshift(invoice);
+  io.emit("invoices:update", state.invoices);
+  io.emit("staff:commission:update", invoiceCommissions(monthKey(invoice.date)));
+  res.status(201).json(invoice);
+});
 app.get("/api/plans", requireRole("admin"), (_req, res) => res.json(plans));
 app.post("/api/subscription/checkout", requireRole("admin"), (req, res) => {
   const plan = plans.find((item) => item.id === req.body.planId);

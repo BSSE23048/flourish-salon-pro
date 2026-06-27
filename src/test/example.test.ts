@@ -33,7 +33,9 @@ const schedule = (overrides = {}) => ({
   staff: { id: "stf-sara", name: "Sara Ahmed", title: "Senior Stylist", status: "online" },
   date: "2026-06-26",
   attendance: null,
+  attendancePercentage: 82,
   commission: 12500,
+  revenue: 84000,
   appointments: [
     {
       id: "apt-1",
@@ -63,7 +65,7 @@ describe("StaffPortal dashboard", () => {
     cleanup();
   });
 
-  it("loads and renders the staff dashboard summary, controls, and schedule", async () => {
+  it("loads and renders the staff dashboard summary, leave request controls, and schedule", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(apiResponse(schedule()) as Response);
 
     await renderStaffPortal();
@@ -71,9 +73,9 @@ describe("StaffPortal dashboard", () => {
     expect(screen.getByRole("heading", { name: "Hello, Sara Ahmed" })).toBeInTheDocument();
     expect(screen.getByText("1 appointments")).toBeInTheDocument();
     expect(screen.getByText("Rs. 12,500")).toBeInTheDocument();
-    expect(screen.getByText("Absent")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Availability" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Clock" })).toBeInTheDocument();
+    expect(screen.getAllByText("82%")).toHaveLength(2);
+    expect(screen.getByText("Not marked today")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Request Leave" })).toBeInTheDocument();
     expect(screen.getByText("amina@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("arrived")).toHaveLength(2);
     expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/staff/me/schedule", {
@@ -81,36 +83,35 @@ describe("StaffPortal dashboard", () => {
     });
   });
 
-  it("updates staff availability and refreshes the schedule", async () => {
+  it("submits leave requests to admin", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
-      .mockResolvedValueOnce(apiResponse({ id: "stf-sara", status: "offline_today" }) as Response)
-      .mockResolvedValueOnce(apiResponse(schedule({ staff: { id: "stf-sara", name: "Sara Ahmed", title: "Senior Stylist", status: "offline_today" } })) as Response);
+      .mockResolvedValueOnce(apiResponse({ id: "leave-1", status: "pending" }) as Response);
 
     await renderStaffPortal();
-    fireEvent.click(screen.getByRole("button", { name: /offline today/i }));
+    fireEvent.change(screen.getByPlaceholderText("Reason"), { target: { value: "Family commitment" } });
+    fireEvent.click(screen.getByRole("button", { name: /send request/i }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/staff/stf-sara/status", {
-        method: "PATCH",
+      expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/staff/me/leave", {
+        method: "POST",
         headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": "stf-sara" },
-        body: JSON.stringify({ status: "offline_today" }),
+        body: expect.stringContaining("Family commitment"),
       });
     });
-    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith("Availability set to offline today"));
-    expect(fetch).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith("Leave request sent to admin"));
   });
 
-  it("shows an error toast when clock-in cannot reach the API", async () => {
+  it("shows an error toast when leave request cannot reach the API", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
       .mockRejectedValueOnce(new Error("Failed to fetch"));
 
     await renderStaffPortal();
-    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+    fireEvent.click(screen.getByRole("button", { name: /send request/i }));
 
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Failed to fetch"));
-    expect(mocks.toast.success).not.toHaveBeenCalledWith("Clocked in");
+    expect(mocks.toast.success).not.toHaveBeenCalledWith("Leave request sent to admin");
   });
 
   it("surfaces API errors when an appointment status update fails", async () => {

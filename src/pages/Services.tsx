@@ -4,12 +4,11 @@ import PageHeader from "@/components/PageHeader";
 import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { API_URL } from "@/lib/api";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 const categories = ["Hair", "Beard", "Grooming", "Skin", "Color", "Package"];
 

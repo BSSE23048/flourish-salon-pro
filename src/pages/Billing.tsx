@@ -1,28 +1,35 @@
-import { useState } from "react";
-import { Plus, Receipt, Download, CreditCard, Banknote, Smartphone } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Banknote, CreditCard, Download, Plus, Receipt, Smartphone, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
-import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { API_URL } from "@/lib/api";
 import { toast } from "sonner";
 
-const initialInvoices = [
-  { id: "#INV-1042", date: "2026-02-26", customer: "Ayesha Khan", services: "Haircut, Blowdry", total: "3500", payment: "Cash", status: "Paid" },
-  { id: "#INV-1041", date: "2026-02-26", customer: "Fatima Ali", services: "Facial Treatment", total: "4500", payment: "Card", status: "Paid" },
-  { id: "#INV-1040", date: "2026-02-25", customer: "Zainab Raza", services: "Manicure, Pedicure, Gel", total: "5500", payment: "JazzCash", status: "Paid" },
-  { id: "#INV-1039", date: "2026-02-25", customer: "Mehak Tariq", services: "Hair Color", total: "4000", payment: "Easypaisa", status: "Paid" },
-  { id: "#INV-1038", date: "2026-02-24", customer: "Sana Malik", services: "Bridal Makeup", total: "15000", payment: "Card", status: "Paid" },
-  { id: "#INV-1037", date: "2026-02-24", customer: "Rabia Noor", services: "Threading, Facial", total: "3000", payment: "Cash", status: "Pending" },
-];
+type Service = { id: string; name: string; price: number };
+type Staff = { id: string; name: string };
+type InvoiceItem = { serviceId: string; name: string; staffId: string; quantity: number; unitPrice: number; total: number; custom: boolean };
+type Invoice = { id: string; date: string; customer: string; items: InvoiceItem[]; subtotal: number; discount: number; total: number; payment: string; status: string };
 
 const paymentIcons: Record<string, React.ReactNode> = {
-  Cash: <Banknote className="w-3.5 h-3.5" />,
-  Card: <CreditCard className="w-3.5 h-3.5" />,
-  JazzCash: <Smartphone className="w-3.5 h-3.5" />,
-  Easypaisa: <Smartphone className="w-3.5 h-3.5" />,
+  Cash: <Banknote className="h-3.5 w-3.5" />,
+  Card: <CreditCard className="h-3.5 w-3.5" />,
+  JazzCash: <Smartphone className="h-3.5 w-3.5" />,
+  Easypaisa: <Smartphone className="h-3.5 w-3.5" />,
 };
 
-function downloadInvoice(invoice: typeof initialInvoices[0]) {
+function money(value: number) {
+  return `Rs. ${Number(value || 0).toLocaleString()}`;
+}
+
+function downloadInvoice(invoice: Invoice) {
+  const lines = invoice.items.map((item) =>
+    `${item.name} x ${item.quantity} @ ${money(item.unitPrice)} = ${money(item.total)}`
+  ).join("\n");
+  const discountLine = invoice.discount > 0 ? `\nDiscount:       -${money(invoice.discount)}` : "";
   const content = `
 =======================================
          GLAMOUR STUDIO
@@ -32,12 +39,14 @@ function downloadInvoice(invoice: typeof initialInvoices[0]) {
 Date: ${invoice.date}
 Customer: ${invoice.customer}
 
-Services: ${invoice.services}
+Services:
+${lines}
 
 ---------------------------------------
-Total:          Rs. ${Number(invoice.total).toLocaleString()}
+Subtotal:        ${money(invoice.subtotal)}${discountLine}
+Total:           ${money(invoice.total)}
 Payment Method: ${invoice.payment}
-Status:         ${invoice.status}
+Status:          ${invoice.status}
 ---------------------------------------
 
 Thank you for choosing Glamour Studio!
@@ -48,85 +57,197 @@ Thank you for choosing Glamour Studio!
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Invoice-${invoice.id.replace("#", "")}.txt`;
+  a.download = `Invoice-${invoice.id}.txt`;
   a.click();
   URL.revokeObjectURL(url);
-  toast.success(`Invoice ${invoice.id} downloaded!`);
+  toast.success(`Invoice ${invoice.id} downloaded`);
 }
 
 export default function Billing() {
-  const [invoices, setInvoices] = useState(initialInvoices);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [customer, setCustomer] = useState("");
+  const [payment, setPayment] = useState("Cash");
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [discount, setDiscount] = useState("0");
+  const [items, setItems] = useState<InvoiceItem[]>([]);
 
-  let nextNum = 1043;
+  const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.total, 0), [items]);
+  const discountAmount = discountEnabled ? Math.max(0, Number(discount || 0)) : 0;
+  const total = Math.max(0, subtotal - discountAmount);
+
+  const loadData = async () => {
+    const [invoiceRes, serviceRes, staffRes] = await Promise.all([
+      fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
+    ]);
+    const [invoiceData, serviceData, staffData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json()]);
+    setInvoices(invoiceData);
+    setServices(serviceData);
+    setStaff(staffData);
+  };
+
+  useEffect(() => {
+    loadData().catch(() => toast.error("Could not load billing data"));
+  }, []);
+
+  const addItem = () => {
+    const service = services[0];
+    setItems((current) => [
+      ...current,
+      {
+        serviceId: service?.id || "other",
+        name: service?.name || "Other service",
+        staffId: staff[0]?.id || "",
+        quantity: 1,
+        unitPrice: Number(service?.price || 0),
+        total: Number(service?.price || 0),
+        custom: !service,
+      },
+    ]);
+  };
+
+  const updateItem = (index: number, patch: Partial<InvoiceItem>) => {
+    setItems((current) => current.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const next = { ...item, ...patch };
+      next.total = Math.max(1, Number(next.quantity || 1)) * Math.max(0, Number(next.unitPrice || 0));
+      return next;
+    }));
+  };
+
+  const selectService = (index: number, serviceId: string) => {
+    if (serviceId === "other") {
+      updateItem(index, { serviceId: "other", name: "Other service", unitPrice: 0, custom: true });
+      return;
+    }
+    const service = services.find((item) => item.id === serviceId);
+    if (service) updateItem(index, { serviceId: service.id, name: service.name, unitPrice: Number(service.price), custom: false });
+  };
+
+  const createInvoice = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        body: JSON.stringify({ customer, payment, discount: discountAmount, items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not create invoice");
+      toast.success(`Invoice ${data.id} created for ${money(data.total)}`);
+      setShowAdd(false);
+      setCustomer("");
+      setDiscount("0");
+      setDiscountEnabled(false);
+      setItems([]);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create invoice");
+    }
+  };
 
   return (
     <div>
       <PageHeader
         title="Billing & Invoices"
-        subtitle="Manage payments and generate invoices"
-        actions={<Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4 mr-2" />New Invoice</Button>}
+        subtitle="Service-linked invoices that feed staff commission"
+        actions={<Button onClick={() => { setShowAdd(true); if (items.length === 0) addItem(); }}><Plus className="mr-2 h-4 w-4" />New Invoice</Button>}
       />
 
-      <FormDialog
-        open={showAdd}
-        onOpenChange={setShowAdd}
-        title="Create Invoice"
-        fields={[
-          { key: "customer", label: "Customer Name", required: true, placeholder: "e.g. Ayesha Khan" },
-          { key: "services", label: "Services (comma separated)", required: true, placeholder: "e.g. Haircut, Blowdry" },
-          { key: "total", label: "Total Amount (Rs.)", type: "number", required: true, placeholder: "e.g. 3500" },
-          { key: "payment", label: "Payment Method", type: "select", options: ["Cash", "Card", "Easypaisa", "JazzCash"], required: true },
-        ]}
-        onSubmit={(data) => {
-          const newInvoice = {
-            id: `#INV-${nextNum++}`,
-            date: new Date().toISOString().split("T")[0],
-            customer: data.customer,
-            services: data.services,
-            total: data.total,
-            payment: data.payment,
-            status: "Paid",
-          };
-          setInvoices([newInvoice, ...invoices]);
-          toast.success(`Invoice ${newInvoice.id} created for Rs. ${Number(data.total).toLocaleString()}`);
-        }}
-        submitLabel="Generate Invoice"
-      />
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
-          { label: "Today's Sales", value: `Rs. ${invoices.filter(i => i.date === "2026-02-26").reduce((s, i) => s + Number(i.total), 0).toLocaleString()}`, sub: `${invoices.filter(i => i.date === "2026-02-26").length} invoices` },
-          { label: "This Week", value: `Rs. ${invoices.reduce((s, i) => s + Number(i.total), 0).toLocaleString()}`, sub: `${invoices.length} invoices` },
-          { label: "Cash", value: `Rs. ${invoices.filter(i => i.payment === "Cash").reduce((s, i) => s + Number(i.total), 0).toLocaleString()}`, sub: `${invoices.filter(i => i.payment === "Cash").length} transactions` },
-          { label: "Digital", value: `Rs. ${invoices.filter(i => i.payment !== "Cash").reduce((s, i) => s + Number(i.total), 0).toLocaleString()}`, sub: `${invoices.filter(i => i.payment !== "Cash").length} transactions` },
-        ].map((s, i) => (
-          <div key={i} className="bg-card rounded-xl border border-border p-4 shadow-card">
-            <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
-            <p className="text-xl font-bold text-foreground mt-1">{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{s.sub}</p>
+          { label: "Today's Sales", value: money(invoices.filter((invoice) => invoice.date === new Date().toISOString().slice(0, 10)).reduce((sum, invoice) => sum + invoice.total, 0)), sub: "paid today" },
+          { label: "All Sales", value: money(invoices.reduce((sum, invoice) => sum + invoice.total, 0)), sub: `${invoices.length} invoices` },
+          { label: "Cash", value: money(invoices.filter((invoice) => invoice.payment === "Cash").reduce((sum, invoice) => sum + invoice.total, 0)), sub: "cash payments" },
+          { label: "Digital", value: money(invoices.filter((invoice) => invoice.payment !== "Cash").reduce((sum, invoice) => sum + invoice.total, 0)), sub: "card/mobile payments" },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-border bg-card p-4 shadow-card">
+            <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+            <p className="mt-1 text-xl font-bold text-foreground">{stat.value}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{stat.sub}</p>
           </div>
         ))}
       </div>
 
-      <div className="bg-card rounded-xl border border-border shadow-card">
-        <div className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Receipt className="w-4 h-4" />Invoice History</h3>
+      <div className="rounded-xl border border-border bg-card shadow-card">
+        <div className="border-b border-border p-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground"><Receipt className="h-4 w-4" />Invoice History</h3>
         </div>
         <DataTable
           columns={[
             { key: "id", label: "Invoice", render: (row) => <span className="font-mono text-xs font-medium">{row.id}</span> },
             { key: "date", label: "Date" },
             { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer}</span> },
-            { key: "services", label: "Services" },
-            { key: "total", label: "Total", render: (row) => <span className="font-semibold text-foreground">Rs. {Number(row.total).toLocaleString()}</span> },
+            { key: "items", label: "Services", render: (row) => row.items.map((item) => `${item.name} x${item.quantity}`).join(", ") },
+            { key: "discount", label: "Discount", render: (row) => row.discount > 0 ? money(row.discount) : "-" },
+            { key: "total", label: "Total", render: (row) => <span className="font-semibold text-foreground">{money(row.total)}</span> },
             { key: "payment", label: "Payment", render: (row) => <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{paymentIcons[row.payment]} {row.payment}</span> },
-            { key: "status", label: "Status", render: (row) => <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${row.status === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>{row.status}</span> },
-            { key: "actions", label: "", render: (row) => <button onClick={() => downloadInvoice(row)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"><Download className="w-4 h-4" /></button> },
+            { key: "actions", label: "", render: (row) => <button onClick={() => downloadInvoice(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Download className="h-4 w-4" /></button> },
           ]}
           data={invoices}
         />
       </div>
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Input placeholder="Customer name" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+            <Select value={payment} onValueChange={setPayment}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{["Cash", "Card", "Easypaisa", "JazzCash"].map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>
+            </Select>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={discountEnabled} onChange={(event) => setDiscountEnabled(event.target.checked)} />
+              Apply discount
+            </label>
+          </div>
+          {discountEnabled && <Input type="number" placeholder="Discount amount" value={discount} onChange={(event) => setDiscount(event.target.value)} />}
+
+          <div className="space-y-3">
+            {items.map((item, index) => (
+              <div key={index} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[1fr_1fr_90px_130px_110px_40px]">
+                <Select value={item.serviceId} onValueChange={(value) => selectService(index, value)}>
+                  <SelectTrigger><SelectValue placeholder="Service" /></SelectTrigger>
+                  <SelectContent>
+                    {services.map((service) => <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>)}
+                    <SelectItem value="other">Other service</SelectItem>
+                  </SelectContent>
+                </Select>
+                {item.custom ? (
+                  <Input value={item.name} onChange={(event) => updateItem(index, { name: event.target.value })} placeholder="Service name" />
+                ) : (
+                  <div className="flex items-center rounded-md border border-border px-3 text-sm">{item.name}</div>
+                )}
+                <Input type="number" min="1" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) })} />
+                <Input type="number" min="0" value={item.unitPrice} onChange={(event) => updateItem(index, { unitPrice: Number(event.target.value) })} disabled={!item.custom} />
+                <Select value={item.staffId} onValueChange={(value) => updateItem(index, { staffId: value })}>
+                  <SelectTrigger><SelectValue placeholder="Staff" /></SelectTrigger>
+                  <SelectContent>{staff.map((member) => <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <button className="flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <Button variant="outline" onClick={addItem}>Add Service Line</Button>
+
+          <div className="rounded-lg bg-muted p-4 text-sm">
+            <div className="flex justify-between"><span>Subtotal</span><span>{money(subtotal)}</span></div>
+            {discountEnabled && discountAmount > 0 && <div className="flex justify-between"><span>Discount</span><span>-{money(discountAmount)}</span></div>}
+            <div className="mt-2 flex justify-between text-base font-bold"><span>Total</span><span>{money(total)}</span></div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={createInvoice}>Generate Invoice</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

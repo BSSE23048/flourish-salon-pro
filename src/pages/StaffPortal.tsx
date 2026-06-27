@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, CheckCircle2, LogOut, Power, Timer, UserCheck, Wallet } from "lucide-react";
+import { CalendarDays, CheckCircle2, LogOut, Send, Timer, UserCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+import { API_UNAVAILABLE_MESSAGE, API_URL } from "@/lib/api";
 
 type Appointment = {
   id: string;
@@ -22,7 +23,18 @@ type StaffSchedule = {
   date: string;
   appointments: Appointment[];
   attendance: AttendanceLog | null;
+  attendancePercentage: number;
   commission: number;
+  revenue: number;
+  payroll?: {
+    baseSalary: number;
+    commission: number;
+    deductions: number;
+    bonuses: number;
+    payable: number;
+    paid: boolean;
+    paidAt: string | null;
+  };
 };
 
 type StaffAvailability = "online" | "offline_today" | "on_leave";
@@ -30,15 +42,10 @@ type AttendanceLog = {
   id: string;
   clockInAt: string | null;
   clockOutAt: string | null;
-  status: "clocked_in" | "clocked_out";
+  status: string;
 };
 
 const statusOptions = ["arrived", "in_progress", "completed", "no_show"];
-const availabilityOptions: { value: StaffAvailability; label: string }[] = [
-  { value: "online", label: "Online" },
-  { value: "offline_today", label: "Offline Today" },
-  { value: "on_leave", label: "On Leave" },
-];
 
 const getApiError = async (res: Response, fallback: string) => {
   try {
@@ -51,8 +58,9 @@ const getApiError = async (res: Response, fallback: string) => {
 
 export default function StaffPortal() {
   const { signOut, profile } = useAuth();
-  const [schedule, setSchedule] = useState<StaffSchedule>({ date: new Date().toISOString().slice(0, 10), appointments: [], attendance: null, commission: 0 });
+  const [schedule, setSchedule] = useState<StaffSchedule>({ date: new Date().toISOString().slice(0, 10), appointments: [], attendance: null, attendancePercentage: 0, commission: 0, revenue: 0 });
   const [loading, setLoading] = useState(false);
+  const [leave, setLeave] = useState({ fromDate: new Date().toISOString().slice(0, 10), toDate: new Date().toISOString().slice(0, 10), reason: "" });
 
   const fetchSchedule = async () => {
     const res = await fetch(`${API_URL}/api/staff/me/schedule`, {
@@ -62,44 +70,26 @@ export default function StaffPortal() {
     setSchedule(data);
   };
 
-  const updateAvailability = async (status: StaffAvailability) => {
-    const staffId = schedule.staff?.id || "stf-sara";
+  const requestLeave = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/staff/${staffId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": staffId },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) {
-        toast.error(await getApiError(res, "Could not update availability"));
-        return;
-      }
-      toast.success(`Availability set to ${status.replace("_", " ")}`);
-      await fetchSchedule();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update availability");
-    }
-  };
-
-  const punchClock = async (action: "clock-in" | "clock-out") => {
-    try {
-      const res = await fetch(`${API_URL}/api/staff/me/${action}`, {
+      const res = await fetch(`${API_URL}/api/staff/me/leave`, {
         method: "POST",
-        headers: { "x-role": "staff", "x-staff-id": schedule.staff?.id || "stf-sara" },
+        headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": schedule.staff?.id || "stf-sara" },
+        body: JSON.stringify(leave),
       });
       if (!res.ok) {
-        toast.error(await getApiError(res, "Attendance update failed"));
+        toast.error(await getApiError(res, "Could not submit leave request"));
         return;
       }
-      toast.success(action === "clock-in" ? "Clocked in" : "Clocked out");
-      await fetchSchedule();
+      toast.success("Leave request sent to admin");
+      setLeave({ ...leave, reason: "" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Attendance update failed");
+      toast.error(error instanceof Error ? error.message : "Could not submit leave request");
     }
   };
 
   useEffect(() => {
-    fetchSchedule().catch(() => toast.error("Could not load staff schedule"));
+    fetchSchedule().catch(() => toast.error(API_UNAVAILABLE_MESSAGE));
   }, []);
 
   const updateStatus = async (appointmentId: string, status: string) => {
@@ -141,8 +131,9 @@ export default function StaffPortal() {
         </div>
         <div className="rounded-lg border border-[#decfbd] bg-white p-5">
           <Wallet className="mb-3 h-5 w-5 text-[#b8794d]" />
-          <p className="text-sm text-[#6f6459]">Estimated commission</p>
-          <p className="text-2xl font-semibold">Rs. {schedule.commission.toLocaleString()}</p>
+          <p className="text-sm text-[#6f6459]">Total payable</p>
+          <p className="text-2xl font-semibold">Rs. {Number(schedule.payroll?.payable || 0).toLocaleString()}</p>
+          <p className="mt-1 text-xs text-[#6f6459]">{schedule.payroll?.paid ? "Salary paid" : "Salary unpaid"}</p>
         </div>
         <div className="rounded-lg border border-[#decfbd] bg-white p-5">
           <Timer className="mb-3 h-5 w-5 text-[#b8794d]" />
@@ -152,35 +143,46 @@ export default function StaffPortal() {
         <div className="rounded-lg border border-[#decfbd] bg-white p-5">
           <UserCheck className="mb-3 h-5 w-5 text-[#b8794d]" />
           <p className="text-sm text-[#6f6459]">Attendance</p>
-          <p className="text-2xl font-semibold">{schedule.attendance?.status?.replace("_", " ") || "Absent"}</p>
+          <p className="text-2xl font-semibold">{schedule.attendancePercentage}%</p>
+          <p className="mt-1 text-xs text-[#6f6459]">{schedule.attendance?.status?.replace("_", " ") || "Not marked today"}</p>
         </div>
       </section>
 
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
-          <h2 className="font-serif text-2xl">Availability</h2>
-          <p className="mt-1 text-sm text-[#6f6459]">Offline staff are hidden from customer booking immediately.</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {availabilityOptions.map((option) => (
-              <Button
-                key={option.value}
-                variant={schedule.staff?.status === option.value ? "default" : "outline"}
-                onClick={() => updateAvailability(option.value)}
-              >
-                <Power className="mr-2 h-4 w-4" />
-                {option.label}
-              </Button>
-            ))}
-          </div>
+          <h2 className="font-serif text-2xl">Attendance</h2>
+          <p className="mt-1 text-sm text-[#6f6459]">Attendance is marked by admin only. Contact admin for corrections.</p>
+          <p className="mt-4 text-3xl font-semibold">{schedule.attendancePercentage}%</p>
         </div>
         <div className="rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
-          <h2 className="font-serif text-2xl">Clock</h2>
-          <p className="mt-1 text-sm text-[#6f6459]">
-            {schedule.attendance?.clockInAt ? `Clocked in at ${new Date(schedule.attendance.clockInAt).toLocaleTimeString()}` : "Not clocked in yet"}
-          </p>
-          <div className="mt-4 flex gap-2">
-            <Button onClick={() => punchClock("clock-in")} disabled={Boolean(schedule.attendance?.clockInAt && !schedule.attendance?.clockOutAt)}>Clock In</Button>
-            <Button variant="outline" onClick={() => punchClock("clock-out")} disabled={!schedule.attendance?.clockInAt || Boolean(schedule.attendance?.clockOutAt)}>Clock Out</Button>
+          <h2 className="font-serif text-2xl">Request Leave</h2>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Input type="date" value={leave.fromDate} onChange={(event) => setLeave({ ...leave, fromDate: event.target.value })} />
+            <Input type="date" value={leave.toDate} onChange={(event) => setLeave({ ...leave, toDate: event.target.value })} />
+          </div>
+          <Textarea className="mt-3" placeholder="Reason" value={leave.reason} onChange={(event) => setLeave({ ...leave, reason: event.target.value })} />
+          <Button className="mt-3" onClick={requestLeave}><Send className="mr-2 h-4 w-4" />Send Request</Button>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-[#decfbd] bg-white p-5 shadow-sm">
+        <h2 className="font-serif text-2xl">Payroll</h2>
+        <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-6">
+          {[
+            ["Salary", schedule.payroll?.baseSalary || 0],
+            ["Commission", schedule.payroll?.commission || schedule.commission || 0],
+            ["Bonus", schedule.payroll?.bonuses || 0],
+            ["Deduction", schedule.payroll?.deductions || 0],
+            ["Payable", schedule.payroll?.payable || 0],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-lg bg-[#f7f2ea] p-4">
+              <p className="text-xs text-[#6f6459]">{label}</p>
+              <p className="mt-1 font-semibold">Rs. {Number(value).toLocaleString()}</p>
+            </div>
+          ))}
+          <div className="rounded-lg bg-[#f7f2ea] p-4">
+            <p className="text-xs text-[#6f6459]">Status</p>
+            <p className="mt-1 font-semibold">{schedule.payroll?.paid ? "Paid" : "Unpaid"}</p>
           </div>
         </div>
       </section>

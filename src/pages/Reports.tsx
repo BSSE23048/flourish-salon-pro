@@ -1,6 +1,8 @@
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
-import { DollarSign, TrendingUp, Clock, Scissors } from "lucide-react";
+import { DollarSign, TrendingUp, Scissors, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend,
@@ -34,15 +36,29 @@ const staffRevenue = [
 ];
 
 export default function Reports() {
+  const [financials, setFinancials] = useState({
+    netRevenue: 0,
+    payrollPayable: 0,
+    profitAfterPayroll: 0,
+    invoiceCount: 0,
+  });
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/financials`, { headers: { "x-role": "admin" } })
+      .then((res) => res.json())
+      .then((data) => setFinancials(data))
+      .catch(() => undefined);
+  }, []);
+
   return (
     <div>
       <PageHeader title="Reports & Analytics" subtitle="Insights to grow your business" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Daily Revenue" value="Rs. 28,000" icon={<DollarSign className="w-5 h-5" />} trend={{ value: "12%", positive: true }} />
-        <StatCard title="Monthly Revenue" value="Rs. 4.2L" icon={<TrendingUp className="w-5 h-5" />} trend={{ value: "15%", positive: true }} />
-        <StatCard title="Peak Hour" value="5:00 PM" icon={<Clock className="w-5 h-5" />} subtitle="Most bookings" />
-        <StatCard title="Top Service" value="Haircut" icon={<Scissors className="w-5 h-5" />} subtitle="35% of bookings" />
+        <StatCard title="Net Revenue" value={`Rs. ${financials.netRevenue.toLocaleString()}`} icon={<DollarSign className="w-5 h-5" />} subtitle={`${financials.invoiceCount} paid invoices`} />
+        <StatCard title="Payroll Cost" value={`Rs. ${financials.payrollPayable.toLocaleString()}`} icon={<Wallet className="w-5 h-5" />} subtitle="Salary + commission" />
+        <StatCard title="Profit After Payroll" value={`Rs. ${financials.profitAfterPayroll.toLocaleString()}`} icon={<TrendingUp className="w-5 h-5" />} trend={{ value: financials.profitAfterPayroll >= 0 ? "Positive" : "Loss", positive: financials.profitAfterPayroll >= 0 }} />
+        <StatCard title="Top Service" value="Haircut" icon={<Scissors className="w-5 h-5" />} subtitle="Connected analytics next" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

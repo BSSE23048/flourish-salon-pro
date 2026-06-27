@@ -8,9 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { toast } from "sonner";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 type Service = {
   id: string;
@@ -136,6 +135,7 @@ export default function CustomerPortal() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [activeServiceCategory, setActiveServiceCategory] = useState("All");
+  const [apiReady, setApiReady] = useState(false);
 
   const service = useMemo(() => services.find((item) => item.id === selectedService), [selectedService, services]);
   const artist = useMemo(() => staff.find((item) => item.id === selectedStaff), [selectedStaff, staff]);
@@ -288,12 +288,17 @@ export default function CustomerPortal() {
       .then(([serviceData, staffData]) => {
         setServices(serviceData);
         setStaff(staffData);
+        setApiReady(true);
       })
-      .catch(() => toast.error("Could not load salon menu. Check the API server."));
+      .catch(() => {
+        setApiReady(false);
+        toast.error(API_UNAVAILABLE_MESSAGE);
+      });
   }, []);
 
   useEffect(() => {
-    const socket: Socket = io(API_URL);
+    if (!apiReady) return;
+    const socket: Socket = io(API_URL, SOCKET_OPTIONS);
     socket.on("staff:update", () => {
       fetch(`${API_URL}/api/staff`)
         .then((res) => res.json())
@@ -309,7 +314,7 @@ export default function CustomerPortal() {
     return () => {
       socket.disconnect();
     };
-  }, [selectedStaff]);
+  }, [apiReady, selectedStaff]);
 
   useEffect(() => {
     fetchAvailability();
@@ -324,15 +329,15 @@ export default function CustomerPortal() {
   }, [customerEmail, session]);
 
   useEffect(() => {
-    if (!selectedStaff || !selectedDate) return;
-    const socket: Socket = io(API_URL);
+    if (!apiReady || !selectedStaff || !selectedDate) return;
+    const socket: Socket = io(API_URL, SOCKET_OPTIONS);
     socket.emit("schedule:join", { staffId: selectedStaff, date: selectedDate });
     socket.on("schedule:update", fetchAvailability);
     socket.on("waitlist:notify", () => toast.success("A waitlisted client was notified for an opened slot."));
     return () => {
       socket.disconnect();
     };
-  }, [fetchAvailability, selectedStaff, selectedDate, selectedService]);
+  }, [apiReady, fetchAvailability, selectedStaff, selectedDate, selectedService]);
 
   const holdSlot = async (slot: Slot) => {
     if (!slot.available || !service || !artist) return;

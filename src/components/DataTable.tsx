@@ -13,7 +13,7 @@ interface DataTableProps<T> {
   emptyMessage?: string;
 }
 
-export default function DataTable<T extends Record<string, React.ReactNode>>({
+export default function DataTable<T extends Record<string, unknown>>({
   columns,
   data,
   emptyMessage = "No data found",
@@ -46,7 +46,7 @@ export default function DataTable<T extends Record<string, React.ReactNode>>({
             <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
               {columns.map((col) => (
                 <td key={col.key} className="py-3 px-4 text-sm text-foreground">
-                  {col.render ? col.render(item) : item[col.key]}
+                  {col.render ? col.render(item) : item[col.key] as React.ReactNode}
                 </td>
               ))}
             </tr>

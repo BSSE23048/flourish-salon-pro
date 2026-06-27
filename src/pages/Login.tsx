@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { Scissors, Eye, EyeOff } from "lucide-react";
+import { Scissors, Eye, EyeOff, ShieldCheck, User, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [loginType, setLoginType] = useState<"admin" | "staff" | "client">("admin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -15,7 +16,11 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
   const router = useRouter();
-  const portal = router.query.portal === "staff" ? "staff" : router.query.portal === "admin" ? "admin" : null;
+
+  useEffect(() => {
+    if (router.query.portal === "staff") setLoginType("staff");
+    if (router.query.portal === "admin") setLoginType("admin");
+  }, [router.query.portal]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,13 +54,43 @@ export default function Login() {
           </div>
           <h1 className="text-2xl font-bold text-foreground">Flourish Salon Pro</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {isSignUp ? "Create your account" : portal === "staff" ? "Staff sign in" : portal === "admin" ? "Admin portal sign in" : "Sign in to continue"}
+            {isSignUp ? "Create your client account" : `${loginType === "client" ? "Client" : loginType === "admin" ? "Admin" : "Staff"} sign in`}
           </p>
         </div>
 
         <div className="bg-card rounded-xl border border-border p-6 shadow-card">
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            {[
+              { key: "admin", label: "Admin", icon: ShieldCheck },
+              { key: "staff", label: "Staff", icon: Users },
+              { key: "client", label: "Client", icon: User },
+            ].map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => {
+                  setLoginType(option.key as "admin" | "staff" | "client");
+                  setIsSignUp(option.key === "client" ? isSignUp : false);
+                  if (option.key === "admin") {
+                    setEmail("admin@flourish.local");
+                    setPassword("password123");
+                  } else if (option.key === "staff") {
+                    setEmail("staff@flourish.local");
+                    setPassword("staff123");
+                  } else {
+                    setEmail("");
+                    setPassword("");
+                  }
+                }}
+                className={`rounded-lg border p-3 text-xs font-semibold transition ${loginType === option.key ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted text-muted-foreground hover:text-foreground"}`}
+              >
+                <option.icon className="mx-auto mb-1 h-4 w-4" />
+                {option.label}
+              </button>
+            ))}
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {isSignUp && (
+            {isSignUp && loginType === "client" && (
               <div>
                 <label className="text-sm font-medium text-foreground mb-1.5 block">Full Name</label>
                 <Input
@@ -72,7 +107,7 @@ export default function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@glamourstudio.com"
+                placeholder={loginType === "admin" ? "admin@flourish.local" : loginType === "staff" ? "staff@flourish.local" : "client@email.com"}
                 required
               />
             </div>
@@ -97,7 +132,7 @@ export default function Login() {
               </div>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (isSignUp ? "Creating account..." : "Signing in...") : (isSignUp ? "Create Account" : "Sign In")}
+              {loading ? (isSignUp ? "Creating account..." : "Signing in...") : (isSignUp ? "Create Client Account" : `Sign In as ${loginType === "client" ? "Client" : loginType === "admin" ? "Admin" : "Staff"}`)}
             </Button>
           </form>
 
@@ -108,10 +143,11 @@ export default function Login() {
               <p>Staff: staff@flourish.local / staff123</p>
             </div>
             <button
+              disabled={loginType !== "client"}
               onClick={() => setIsSignUp(!isSignUp)}
-              className="text-sm text-primary hover:underline"
+              className="text-sm text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
             >
-              {isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up"}
+              {loginType !== "client" ? "Client sign-up only" : isSignUp ? "Already have an account? Sign in" : "Need a client account? Sign up"}
             </button>
           </div>
         </div>
