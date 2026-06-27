@@ -35,91 +35,103 @@ const staffRevenue = [
   { name: "Hina", revenue: 58000 }, { name: "Amina", revenue: 35000 }, { name: "Rukhsar", revenue: 44000 },
 ];
 
+const tooltipStyle = {
+  background: "hsl(40 30% 99%)",
+  border: "1px solid hsl(35 22% 88%)",
+  borderRadius: "12px",
+  fontSize: "12px",
+  boxShadow: "0 4px 12px hsl(25 20% 12% / 0.08)",
+  padding: "10px 14px",
+};
+
+const axisStyle = { fontSize: 11, fill: "hsl(25 15% 48%)", fontFamily: "Satoshi" };
+
+function ChartCard({ title, eyebrow, children }: { title: string; eyebrow: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
+      <p className="text-[11px] uppercase tracking-[0.15em] font-medium text-muted-foreground mb-1">{eyebrow}</p>
+      <h3 className="font-editorial text-xl text-foreground tracking-tight mb-5">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
 export default function Reports() {
   const [financials, setFinancials] = useState({
-    netRevenue: 0,
-    payrollPayable: 0,
-    profitAfterPayroll: 0,
-    invoiceCount: 0,
+    netRevenue: 0, payrollPayable: 0, profitAfterPayroll: 0, invoiceCount: 0,
   });
 
   useEffect(() => {
     fetch(`${API_URL}/api/financials`, { headers: { "x-role": "admin" } })
-      .then((res) => res.json())
-      .then((data) => setFinancials(data))
+      .then((r) => r.json())
+      .then((d) => setFinancials(d))
       .catch(() => undefined);
   }, []);
 
   return (
     <div>
-      <PageHeader title="Reports & Analytics" subtitle="Insights to grow your business" />
+      <PageHeader title="Analytics" subtitle="Business insights to understand your growth and performance." eyebrow="Business" />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Net Revenue" value={`Rs. ${financials.netRevenue.toLocaleString()}`} icon={<DollarSign className="w-5 h-5" />} subtitle={`${financials.invoiceCount} paid invoices`} />
-        <StatCard title="Payroll Cost" value={`Rs. ${financials.payrollPayable.toLocaleString()}`} icon={<Wallet className="w-5 h-5" />} subtitle="Salary + commission" />
-        <StatCard title="Profit After Payroll" value={`Rs. ${financials.profitAfterPayroll.toLocaleString()}`} icon={<TrendingUp className="w-5 h-5" />} trend={{ value: financials.profitAfterPayroll >= 0 ? "Positive" : "Loss", positive: financials.profitAfterPayroll >= 0 }} />
-        <StatCard title="Top Service" value="Haircut" icon={<Scissors className="w-5 h-5" />} subtitle="Connected analytics next" />
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+        <StatCard title="Net Revenue" value={`Rs. ${financials.netRevenue.toLocaleString()}`} icon={<DollarSign />} subtitle={`${financials.invoiceCount} paid invoices`} variant="success" />
+        <StatCard title="Payroll Cost" value={`Rs. ${financials.payrollPayable.toLocaleString()}`} icon={<Wallet />} subtitle="Salary + commission" />
+        <StatCard title="Net Profit" value={`Rs. ${financials.profitAfterPayroll.toLocaleString()}`} icon={<TrendingUp />} trend={{ value: financials.profitAfterPayroll >= 0 ? "Positive" : "Loss", positive: financials.profitAfterPayroll >= 0 }} variant={financials.profitAfterPayroll >= 0 ? "success" : "danger"} />
+        <StatCard title="Top Service" value="Haircut" icon={<Scissors />} subtitle="35% of all bookings" variant="sage" />
       </div>
 
+      {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Daily Sales */}
-        <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Daily Sales (This Week)</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={dailySales}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="day" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
-              <Bar dataKey="sales" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+        <ChartCard title="Daily Sales" eyebrow="This Week">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={dailySales} barCategoryGap="40%">
+              <CartesianGrid strokeDasharray="0" stroke="hsl(35 22% 88%)" vertical={false} />
+              <XAxis dataKey="day" tick={axisStyle} axisLine={false} tickLine={false} />
+              <YAxis tick={axisStyle} axisLine={false} tickLine={false} tickFormatter={(v) => `${v / 1000}k`} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "hsl(35 22% 88% / 0.5)", radius: 4 }} />
+              <Bar dataKey="sales" fill="hsl(var(--chart-1))" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        {/* Popular Services */}
-        <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Most Popular Services</h3>
-          <ResponsiveContainer width="100%" height={250}>
+        <ChartCard title="Popular Services" eyebrow="Distribution">
+          <ResponsiveContainer width="100%" height={240}>
             <PieChart>
-              <Pie data={popularServices} cx="50%" cy="50%" outerRadius={90} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                {popularServices.map((_, i) => (
-                  <Cell key={i} fill={pieColors[i]} />
-                ))}
+              <Pie data={popularServices} cx="50%" cy="50%" outerRadius={90} innerRadius={50} dataKey="value" paddingAngle={2}>
+                {popularServices.map((_, i) => <Cell key={i} fill={pieColors[i]} />)}
               </Pie>
-              <Tooltip />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: "12px", fontFamily: "Satoshi" }} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       </div>
 
+      {/* Charts row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Peak Hours */}
-        <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Peak Hours</h3>
-          <ResponsiveContainer width="100%" height={250}>
+        <ChartCard title="Peak Hours" eyebrow="Foot Traffic">
+          <ResponsiveContainer width="100%" height={240}>
             <LineChart data={peakHours}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
-              <Line type="monotone" dataKey="appointments" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: "hsl(var(--primary))" }} />
+              <CartesianGrid strokeDasharray="0" stroke="hsl(35 22% 88%)" vertical={false} />
+              <XAxis dataKey="hour" tick={axisStyle} axisLine={false} tickLine={false} />
+              <YAxis tick={axisStyle} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Line type="monotone" dataKey="appointments" stroke="hsl(var(--chart-1))" strokeWidth={2.5} dot={{ fill: "hsl(var(--chart-1))", r: 4, strokeWidth: 0 }} activeDot={{ r: 6 }} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        {/* Revenue by Staff */}
-        <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Revenue by Staff</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={staffRevenue} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis type="number" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} width={60} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
+        <ChartCard title="Revenue by Staff" eyebrow="Team Performance">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={staffRevenue} layout="vertical" barCategoryGap="35%">
+              <CartesianGrid strokeDasharray="0" stroke="hsl(35 22% 88%)" horizontal={false} />
+              <XAxis type="number" tick={axisStyle} axisLine={false} tickLine={false} tickFormatter={(v) => `${v / 1000}k`} />
+              <YAxis type="category" dataKey="name" tick={axisStyle} axisLine={false} tickLine={false} width={60} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Bar dataKey="revenue" fill="hsl(var(--chart-2))" radius={[0, 6, 6, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       </div>
     </div>
   );
