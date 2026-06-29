@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
 
 type Adjustment = { id: string; type: "deduction" | "bonus"; amount: number; reason: string };
@@ -64,7 +64,7 @@ export default function Payroll() {
   const loadPayroll = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/payroll?month=${month}`, { headers: { "x-role": "admin" } });
+      const res = await fetch(`${API_URL}/api/payroll?month=${month}`, { headers: await getAuthHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not load payroll");
       setRows(data.rows || []);
@@ -101,7 +101,7 @@ export default function Payroll() {
     try {
       const res = await fetch(`${API_URL}/api/payroll/${row.staffId}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ month, paid }),
       });
       const data = await res.json();
@@ -118,7 +118,7 @@ export default function Payroll() {
     try {
       const res = await fetch(`${API_URL}/api/payroll/adjustments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ staffId: adjusting.staffId, month, ...adjustment, amount: Number(adjustment.amount) }),
       });
       const data = await res.json();
@@ -134,7 +134,7 @@ export default function Payroll() {
 
   const deleteAdjustment = async (id: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/payroll/adjustments/${id}`, { method: "DELETE", headers: { "x-role": "admin" } });
+      const res = await fetch(`${API_URL}/api/payroll/adjustments/${id}`, { method: "DELETE", headers: await getAuthHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not remove adjustment");
       toast.success("Adjustment removed");

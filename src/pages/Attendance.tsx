@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
 import { io, Socket } from "socket.io-client";
 
@@ -47,7 +47,7 @@ export default function Attendance() {
   const loadAttendance = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/attendance?date=${date}&month=${month}`, { headers: { "x-role": "admin" } });
+      const res = await fetch(`${API_URL}/api/admin/attendance?date=${date}&month=${month}`, { headers: await getAuthHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not load attendance");
       setRows(data.staff || []);
@@ -79,7 +79,7 @@ export default function Attendance() {
     try {
       const res = await fetch(`${API_URL}/api/admin/attendance`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ staffId, date, status }),
       });
       const data = await res.json();
@@ -95,7 +95,7 @@ export default function Attendance() {
     try {
       const res = await fetch(`${API_URL}/api/admin/leave-requests/${requestId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ status }),
       });
       const data = await res.json();

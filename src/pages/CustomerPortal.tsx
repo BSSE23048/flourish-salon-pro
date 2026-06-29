@@ -9,6 +9,7 @@ import {
   motion, useScroll, useTransform, useInView, useMotionValueEvent,
   AnimatePresence,
 } from "framer-motion";
+import type { Variants } from "framer-motion";
 import {
   CalendarDays, Check, Clock, CreditCard, MapPin, Menu, Phone,
   Scissors, ShieldCheck, Sparkles, Star, UserRound, Users, X,
@@ -20,11 +21,10 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import Carousel from "@/components/Carousel";
-import ScrollReveal, { StaggerContainer, childFadeUp } from '@/components/ScrollReveal';
 import StickyScrollGallery from '@/components/StickyScrollGallery';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
-import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -184,9 +184,9 @@ function StaggerContainer({ children, className = "", staggerDelay = 0.08 }: {
   );
 }
 
-const childFadeUp = {
+const childFadeUp: Variants = {
   hidden: { opacity: 0, y: 50 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] as const } },
 };
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -208,6 +208,10 @@ export default function CustomerPortal() {
   const [showBooking, setShowBooking]     = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authFullName, setAuthFullName] = useState("");
   const [session, setSession]     = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [apiReady, setApiReady]   = useState(false);
@@ -318,14 +322,74 @@ export default function CustomerPortal() {
 
   const openBooking = () => {
     if (!authReady) return;
-    if (!session) { setAuthModalOpen(true); setMobileNavOpen(false); return; }
+    if (!session) {
+      setAuthMode("login");
+      setAuthModalOpen(true);
+      setMobileNavOpen(false);
+      return;
+    }
     openPendingBooking();
   };
 
-  const signInWithProvider = async (provider: "google" | "apple") => {
-    window.localStorage.setItem("flourish-pending-booking", "true");
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined } });
-    if (error) toast.error(error.message);
+  const submitClientAuth = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!authEmail || !authPassword) {
+      toast.error("Email and password are required.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (authMode === "register") {
+        if (!authFullName.trim()) {
+          toast.error("Full name is required.");
+          return;
+        }
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+          options: {
+            data: { full_name: authFullName, role: "client" },
+            emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+          },
+        });
+        if (error) throw error;
+        setSession(data.session);
+        setCustomerName(authFullName);
+        setCustomerEmail(authEmail);
+        toast.success(data.session ? "Client account created." : "Account created. Check your email if verification is enabled.");
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        if (error) throw error;
+        setSession(data.session);
+        setCustomerName(String(data.session?.user.user_metadata?.full_name || customerName || ""));
+        setCustomerEmail(data.session?.user.email || authEmail);
+        toast.success("Signed in. Choose your appointment.");
+      }
+
+      setAuthModalOpen(false);
+      openPendingBooking();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not sign in");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginClientWithGoogle = async () => {
+    try {
+      window.localStorage.setItem("flourish-pending-booking", "true");
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      window.localStorage.removeItem("flourish-pending-booking");
+      toast.error(error instanceof Error ? error.message : "Google login failed");
+    }
   };
 
   const signOut = async () => {
@@ -339,7 +403,7 @@ export default function CustomerPortal() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/holds`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ date: selectedDate, time: slot.time, staffId: artist.id, serviceId: service.id, customerEmail }),
       });
       const data = await res.json();
@@ -357,7 +421,7 @@ export default function CustomerPortal() {
     if (!service || !artist) return;
     if (!customerEmail || !customerName) { toast.error("Add your name and email first."); return; }
     const res = await fetch(`${API_URL}/api/waitlist`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ customerName, customerEmail, staffId: artist.id, serviceId: service.id, startAt: slot.startAt }),
     });
     if (res.ok) toast.success("You're on the waitlist — we'll notify you.");
@@ -369,7 +433,7 @@ export default function CustomerPortal() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/bookings`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ holdId, customerName, customerEmail, staffId: artist.id, serviceId: service.id, date: selectedDate, time: selectedSlot.time }),
       });
       const data = await res.json();
@@ -438,12 +502,12 @@ export default function CustomerPortal() {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setAuthModalOpen(true)}
+              <Link
+                href="/login"
                 className={cn("hidden md:block text-[13px] font-medium transition-colors", scrolled ? "text-white/70 hover:text-white" : "text-white/60 hover:text-white")}
               >
                 Log in
-              </button>
+              </Link>
             )}
 
             {/* CTA button with minimal hover */}
@@ -497,6 +561,11 @@ export default function CustomerPortal() {
                   </motion.a>
                 ))}
                 <div className="pt-4 space-y-2 border-t border-[#e8e0d4] mt-3">
+                  {!session && (
+                    <Link href="/login" className="flex h-12 w-full items-center justify-center rounded-full border border-[#d8cfc0] text-[13px] font-semibold text-[#1a1a18]">
+                      Log in
+                    </Link>
+                  )}
                   <button onClick={openBooking} disabled={!authReady} className="w-full h-12 rounded-full bg-[#2c5545] text-white text-[13px] font-semibold flex items-center justify-center gap-2">
                     <CalendarDays className="w-4 h-4" /> Book Appointment
                   </button>
@@ -1203,26 +1272,84 @@ export default function CustomerPortal() {
               <div className="w-11 h-11 rounded-xl bg-[#485341] flex items-center justify-center mb-5">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <DialogTitle className="font-sans font-bold text-[32px] text-white tracking-tight">Sign in to book</DialogTitle>
+              <DialogTitle className="font-sans font-bold text-[32px] text-white tracking-tight">
+                {authMode === "register" ? "Create client account" : "Client login"}
+              </DialogTitle>
               <DialogDescription className="text-white/55 text-[14px] leading-relaxed mt-2">
-                Reserve your stylist, hold a live slot, and manage your appointments.
+                Sign in as a client to reserve your stylist and hold a live appointment slot.
               </DialogDescription>
             </DialogHeader>
           </div>
-          <div className="p-8 space-y-3 bg-[#FAF7F2]">
-            <motion.button onClick={() => signInWithProvider("google")}
-              className="h-[52px] w-full rounded-2xl bg-white border border-[#e8e0d4] shadow-[0_1px_3px_rgba(0,0,0,0.02)] text-[14px] font-semibold text-[#1a1a18] flex items-center gap-3 px-5 hover:bg-[#f0ebe3] hover:border-[#d8cfc0] transition-colors"
-              whileHover={{ y: -1 }} whileTap={{ scale: 0.98 }}>
-              <div className="w-8 h-8 rounded-full bg-[#f0ebe3] flex items-center justify-center text-[12px] font-bold text-[#1a1a18]">G</div>
-              Continue with Google
+          <div className="bg-[#FAF7F2] p-8">
+            <form onSubmit={submitClientAuth} className="space-y-4">
+              {authMode === "register" && (
+                <div className="space-y-2">
+                  <label className="block text-[13px] font-semibold text-[#1a1a18]">Full name</label>
+                  <Input
+                    value={authFullName}
+                    onChange={(event) => setAuthFullName(event.target.value)}
+                    placeholder="Your full name"
+                    className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
+                    autoFocus
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="block text-[13px] font-semibold text-[#1a1a18]">Email address</label>
+                <Input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
+                  autoFocus={authMode === "login"}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[13px] font-semibold text-[#1a1a18]">Password</label>
+                <Input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="Enter your password"
+                  minLength={authMode === "register" ? 10 : 6}
+                  className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={loading}
+                className="h-12 w-full rounded-full bg-[#485341] text-[13px] font-semibold text-white hover:bg-[#384232]"
+              >
+                {loading ? "Please wait..." : authMode === "register" ? "Create account and book" : "Login and book"}
+              </Button>
+            </form>
+
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-[#e8e0d4]" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9086]">or</span>
+              <div className="h-px flex-1 bg-[#e8e0d4]" />
+            </div>
+
+            <motion.button
+              type="button"
+              onClick={loginClientWithGoogle}
+              className="flex h-[52px] w-full items-center gap-3 rounded-2xl border border-[#e8e0d4] bg-white px-5 text-[14px] font-semibold text-[#1a1a18] shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors hover:border-[#d8cfc0] hover:bg-[#f0ebe3]"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0ebe3] text-[12px] font-bold text-[#1a1a18]">G</div>
+              Login with Google
             </motion.button>
-            <motion.button onClick={() => signInWithProvider("apple")}
-              className="h-[52px] w-full rounded-2xl bg-white border border-[#e8e0d4] shadow-[0_1px_3px_rgba(0,0,0,0.02)] text-[14px] font-semibold text-[#1a1a18] flex items-center gap-3 px-5 hover:bg-[#f0ebe3] hover:border-[#d8cfc0] transition-colors"
-              whileHover={{ y: -1 }} whileTap={{ scale: 0.98 }}>
-              <div className="w-8 h-8 rounded-full bg-[#1a1a18] flex items-center justify-center text-[12px] font-bold text-white">A</div>
-              Continue with Apple
-            </motion.button>
-            <p className="text-center text-[12px] text-[#7a7168] pt-3 font-medium">Powered by Supabase. Booking opens after sign-in.</p>
+
+            <button
+              type="button"
+              onClick={() => setAuthMode((current) => current === "login" ? "register" : "login")}
+              className="mt-5 w-full text-center text-[13px] font-medium text-[#7a7168] transition-colors hover:text-[#1a1a18]"
+            >
+              {authMode === "register" ? "Already have a client account? Log in" : "New client? Create an account"}
+            </button>
+            <p className="pt-3 text-center text-[12px] font-medium text-[#7a7168]">Booking opens after client sign-in.</p>
           </div>
         </DialogContent>
       </Dialog>

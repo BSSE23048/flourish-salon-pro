@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_URL } from "@/lib/api";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
 
 type Service = { id: string; name: string; price: number };
@@ -79,10 +79,11 @@ export default function Billing() {
   const total = Math.max(0, subtotal - discountAmount);
 
   const loadData = async () => {
+    const headers = await getAuthHeaders();
     const [invoiceRes, serviceRes, staffRes] = await Promise.all([
-      fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
-      fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
-      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/invoices`, { headers }),
+      fetch(`${API_URL}/api/services`, { headers }),
+      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers }),
     ]);
     const [invoiceData, serviceData, staffData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json()]);
     setInvoices(invoiceData);
@@ -132,7 +133,7 @@ export default function Billing() {
     try {
       const res = await fetch(`${API_URL}/api/invoices`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ customer, payment, discount: discountAmount, items }),
       });
       const data = await res.json();

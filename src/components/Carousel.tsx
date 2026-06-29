@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform } from 'framer-motion';
-import type { MotionValue } from 'framer-motion';
+import type { MotionValue, Transition } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 
 const DRAG_BUFFER = 0;
 const VELOCITY_THRESHOLD = 500;
 const GAP = 24; // Increased gap for a more spacious feel
-const SPRING_OPTIONS = { type: 'spring', stiffness: 300, damping: 30 };
+const SPRING_OPTIONS: Transition = { type: 'spring', stiffness: 300, damping: 30 };
 
 export interface CarouselItemProps {
   id: string;
@@ -18,7 +18,7 @@ export interface CarouselItemProps {
   category: string;
 }
 
-type CarouselTransition = typeof SPRING_OPTIONS | { duration: number };
+type CarouselTransition = Transition;
 
 type CarouselCardProps = {
   item: CarouselItemProps;

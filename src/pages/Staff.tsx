@@ -1,327 +1,290 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Trash2, Trophy, Medal } from "lucide-react";
+import { Copy, KeyRound, Plus, RefreshCw, ShieldAlert, UserRound } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
-import DataTable from "@/components/DataTable";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { API_URL } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 
 type StaffAvailability = "online" | "offline_today" | "on_leave";
+
 type StaffMember = {
-  id: string; name: string; title: string; specialties: string[];
-  commissionRate: number; baseSalary: number; status: StaffAvailability;
-  bio: string; monthlyRevenue: number; monthlyCommission: number;
-  monthlyPayable: number; attendancePercentage: number;
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  name: string;
+  email: string;
+  title: string;
+  specialties: string[];
+  commissionRate: number;
+  baseSalary: number;
+  status: StaffAvailability;
+  bio: string;
+  mustResetPassword?: boolean;
+};
+
+type CredentialPayload = {
+  email: string;
+  temporaryPassword: string;
 };
 
 const emptyForm = {
-  name: "", title: "", specialties: "Hair", commissionRate: "10",
-  baseSalary: "0", status: "online" as StaffAvailability, bio: "", pin: "",
+  first_name: "",
+  last_name: "",
+  title: "",
+  specialties: "Hair",
+  commissionRate: "10",
+  baseSalary: "0",
+  bio: "",
 };
 
-const availabilityConfig: Record<StaffAvailability, { label: string; badge: string }> = {
-  online:       { label: "Online",   badge: "success" },
-  offline_today:{ label: "Offline",  badge: "warning" },
-  on_leave:     { label: "On Leave", badge: "muted" },
+const statusLabel: Record<StaffAvailability, string> = {
+  online: "Online",
+  offline_today: "Offline",
+  on_leave: "On leave",
 };
 
-function StaffAvatar({ name }: { name: string }) {
-  const initials = name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-  return (
-    <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-      <span className="text-xs font-semibold text-primary">{initials}</span>
-    </div>
-  );
+function money(value: number) {
+  return `Rs. ${Number(value || 0).toLocaleString()}`;
 }
 
-const RANK_ICONS = [
-  <Trophy key={0} className="h-4 w-4 text-warning" />,
-  <Medal key={1} className="h-4 w-4 text-muted-foreground" />,
-  <Medal key={2} className="h-4 w-4 text-muted-foreground opacity-70" />,
-];
+function initials(name: string) {
+  return name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+}
 
 export default function Staff() {
-  const [staffList, setStaffList] = useState<StaffMember[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<StaffMember | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [form, setForm] = useState(emptyForm);
-  const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
-  const [deletePin, setDeletePin] = useState("");
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [loading, setLoading] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [credentialModal, setCredentialModal] = useState<CredentialPayload | null>(null);
+
+  const credentialText = useMemo(() => {
+    if (!credentialModal) return "";
+    return `Email: ${credentialModal.email}\nTemporary password: ${credentialModal.temporaryPassword}`;
+  }, [credentialModal]);
 
   const loadStaff = useCallback(async () => {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load staff");
+    setStaff(data);
+  }, []);
+
+  useEffect(() => {
+    loadStaff().catch((error) => {
+      toast.error(error instanceof TypeError ? API_UNAVAILABLE_MESSAGE : error instanceof Error ? error.message : "Could not load staff");
+    });
+  }, [loadStaff]);
+
+  const provisionStaff = async () => {
+    setLoading(true);
     try {
-      setLoadError(null);
-      const res = await fetch(`${API_URL}/api/staff?includeUnavailable=true&month=${month}`, { headers: { "x-role": "admin" } });
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+      const res = await fetch(`${API_URL}/api/staff`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...form,
+          commissionRate: Number(form.commissionRate),
+          baseSalary: Number(form.baseSalary),
+          specialties: form.specialties.split(",").map((item) => item.trim()).filter(Boolean),
+        }),
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not load staff");
-      setStaffList(data);
+      if (!res.ok) throw new Error(data.error || "Could not provision staff member");
+      setCredentialModal(data.credentials);
+      setForm(emptyForm);
+      setFormOpen(false);
+      toast.success("Staff account provisioned");
+      await loadStaff();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not load staff";
-      setLoadError(`${message}. Make sure the API server is running on ${API_URL}.`);
-      setStaffList([]);
+      toast.error(error instanceof Error ? error.message : "Could not provision staff member");
+    } finally {
+      setLoading(false);
     }
-  }, [month]);
-
-  useEffect(() => { loadStaff().catch(() => toast.error("Could not load staff")); }, [loadStaff]);
-
-  const leaderboard = useMemo(
-    () => [...staffList].sort((a, b) => b.monthlyCommission - a.monthlyCommission).slice(0, 3),
-    [staffList]
-  );
-
-  const openForm = (staff?: StaffMember) => {
-    setEditing(staff || null);
-    setForm(staff ? {
-      name: staff.name, title: staff.title,
-      specialties: staff.specialties.join(", "),
-      commissionRate: String(staff.commissionRate),
-      baseSalary: String(staff.baseSalary || 0),
-      status: staff.status, bio: staff.bio || "", pin: "",
-    } : emptyForm);
-    setFormOpen(true);
   };
 
-  const saveStaff = async () => {
+  const forcePasswordReset = async (member: StaffMember) => {
     setLoading(true);
     try {
-      const method = editing ? "PATCH" : "POST";
-      const url = editing ? `${API_URL}/api/staff/${editing.id}` : `${API_URL}/api/staff`;
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json", "x-role": "admin", "x-pin": form.pin },
-        body: JSON.stringify({ ...form, commissionRate: Number(form.commissionRate), baseSalary: Number(form.baseSalary), pin: form.pin }),
-      });
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+      const res = await fetch(`${API_URL}/api/staff/${member.id}/force-password-reset`, { method: "POST", headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save");
-      toast.success(editing ? "Staff updated" : "Staff member added");
-      setEditing(null); setForm(emptyForm); setFormOpen(false);
+      if (!res.ok) throw new Error(data.error || "Could not reset password");
+      setCredentialModal(data.credentials);
+      toast.success(`Temporary password generated for ${member.name}`);
       await loadStaff();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save staff");
-    } finally { setLoading(false); }
+      toast.error(error instanceof Error ? error.message : "Password reset failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const deleteStaff = async () => {
-    if (!deleteTarget) return;
-    setLoading(true);
+  const copyCredentials = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/staff/${deleteTarget.id}`, {
-        method: "DELETE", headers: { "x-role": "admin", "x-pin": deletePin },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not delete");
-      toast.success(`${deleteTarget.name} removed`);
-      setDeleteTarget(null); setDeletePin("");
-      await loadStaff();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not delete");
-    } finally { setLoading(false); }
-  };
-
-  const updateAvailability = async (staffId: string, status: StaffAvailability) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/staff/${staffId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
-        body: JSON.stringify({ status }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Update failed");
-      toast.success(`${data.name} marked ${availabilityConfig[status].label}`);
-      await loadStaff();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Update failed");
-    } finally { setLoading(false); }
+      await navigator.clipboard.writeText(credentialText);
+      toast.success("Credentials copied");
+    } catch {
+      toast.error("Clipboard permission denied");
+    }
   };
 
   return (
     <div>
       <PageHeader
         title="Staff"
-        subtitle="Team profiles, salary, attendance, commission, and availability."
-        eyebrow="Team"
+        subtitle="Provision staff accounts, manage team access, and issue one-time temporary credentials."
+        eyebrow="Identity & access"
         actions={
-          <div className="flex items-center gap-3">
-            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-40 h-9 text-sm" />
-            <Button onClick={() => openForm()}>
-              <Plus />Add Staff
-            </Button>
-          </div>
+          <Button onClick={() => setFormOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add Staff Member
+          </Button>
         }
       />
 
-      {/* Leaderboard */}
-      {leaderboard.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-8">
-          {leaderboard.map((member, index) => (
-            <div
-              key={member.id}
-              className={cn(
-                "flex items-center gap-4 rounded-2xl border border-border bg-card p-5 shadow-card",
-                "transition-all duration-250 hover:-translate-y-0.5 hover:shadow-lift",
-                index === 0 && "border-warning/30 bg-warning/5"
-              )}
-            >
-              <div className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-full border flex-shrink-0",
-                index === 0 ? "bg-warning/10 border-warning/20" : "bg-muted border-border"
-              )}>
-                {RANK_ICONS[index]}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {staff.map((member) => (
+          <article key={member.id} className="rounded-lg border border-border bg-card p-5 shadow-card">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-sm font-semibold text-primary">
+                  {initials(member.name)}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="truncate text-base font-semibold text-foreground">{member.name}</h3>
+                  <p className="truncate text-sm text-muted-foreground">{member.email}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{member.title}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="font-medium text-foreground truncate">{member.name}</p>
-                <p className="text-xs text-muted-foreground">{member.title}</p>
-                <p className="font-editorial text-lg text-primary mt-0.5 leading-none">
-                  Rs. {member.monthlyCommission.toLocaleString()}
-                </p>
+              <Badge variant={member.status === "online" ? "success" : member.status === "on_leave" ? "muted" : "warning"}>
+                {statusLabel[member.status]}
+              </Badge>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+              <div className="rounded-md bg-muted p-3">
+                <p className="text-xs text-muted-foreground">Salary</p>
+                <p className="mt-1 font-semibold">{money(member.baseSalary)}</p>
+              </div>
+              <div className="rounded-md bg-muted p-3">
+                <p className="text-xs text-muted-foreground">Commission</p>
+                <p className="mt-1 font-semibold">{member.commissionRate}%</p>
+              </div>
+              <div className="rounded-md bg-muted p-3 md:col-span-2">
+                <p className="text-xs text-muted-foreground">Specialties</p>
+                <p className="mt-1 truncate font-semibold">{member.specialties.join(", ") || "Not assigned"}</p>
               </div>
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Staff table */}
-      <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
-        <DataTable
-          columns={[
-            {
-              key: "name", label: "Staff Member",
-              render: (row) => (
-                <div className="flex items-center gap-3">
-                  <StaffAvatar name={row.name as string} />
-                  <div>
-                    <p className="font-medium leading-none">{row.name as string}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{row.title as string}</p>
-                  </div>
-                </div>
-              ),
-            },
-            { key: "baseSalary",         label: "Salary",     render: (row) => `Rs. ${Number(row.baseSalary || 0).toLocaleString()}` },
-            { key: "commissionRate",      label: "Rate",       render: (row) => `${row.commissionRate}%` },
-            { key: "monthlyRevenue",      label: "Revenue",    render: (row) => `Rs. ${Number(row.monthlyRevenue).toLocaleString()}` },
-            { key: "monthlyCommission",   label: "Commission", render: (row) => <span className="font-semibold text-primary">Rs. {Number(row.monthlyCommission).toLocaleString()}</span> },
-            { key: "monthlyPayable",      label: "Payable",    render: (row) => <span className="font-semibold">Rs. {Number(row.monthlyPayable || 0).toLocaleString()}</span> },
-            { key: "attendancePercentage",label: "Attendance", render: (row) => `${row.attendancePercentage}%` },
-            {
-              key: "status", label: "Status",
-              render: (row) => {
-                const config = availabilityConfig[row.status as StaffAvailability];
-                return <Badge variant={config.badge as "success" | "warning" | "muted"}>{config.label}</Badge>;
-              },
-            },
-            {
-              key: "actions", label: "",
-              render: (row) => (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem onClick={() => openForm(row as unknown as StaffMember)}>
-                      <Pencil className="w-3.5 h-3.5 mr-2" /> Edit profile
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {(["online", "offline_today", "on_leave"] as StaffAvailability[]).map((s) => (
-                      <DropdownMenuItem
-                        key={s}
-                        onClick={() => updateAvailability(row.id as string, s)}
-                        disabled={loading || row.status === s}
-                      >
-                        Mark {availabilityConfig[s].label}
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => setDeleteTarget(row as unknown as StaffMember)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-2" /> Remove
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ),
-            },
-          ]}
-          data={staffList}
-          emptyMessage={loadError || "No staff found"}
-        />
+            {member.mustResetPassword && (
+              <Alert className="mt-4 border-warning/40 bg-warning/10">
+                <ShieldAlert className="h-4 w-4" />
+                <AlertTitle>Password reset required</AlertTitle>
+                <AlertDescription>This staff member must set a permanent password after their next sign-in.</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="mt-4 flex justify-end">
+              <Button variant="outline" disabled={loading} onClick={() => forcePasswordReset(member)}>
+                <KeyRound className="h-4 w-4" />
+                Force Reset Password
+              </Button>
+            </div>
+          </article>
+        ))}
+
+        {staff.length === 0 && (
+          <div className="rounded-lg border border-dashed border-border bg-muted/40 p-10 text-center text-sm text-muted-foreground lg:col-span-2">
+            <UserRound className="mx-auto mb-3 h-8 w-8" />
+            No staff members loaded.
+          </div>
+        )}
       </div>
 
-      {/* Edit/Add Dialog */}
-      <Dialog open={formOpen} onOpenChange={(open) => { setFormOpen(open); if (!open) { setEditing(null); setForm(emptyForm); } }}>
-        <DialogContent>
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Staff Member" : "Add Staff Member"}</DialogTitle>
+            <DialogTitle>Add Staff Member</DialogTitle>
+            <DialogDescription>
+              Create a staff user in Supabase Auth and show temporary credentials once.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Full Name</label>
-                <Input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Role / Title</label>
-                <Input placeholder="e.g. Senior Stylist" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-              </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">First name</label>
+              <Input value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Last name</label>
+              <Input value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Title</label>
+              <Input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Senior Stylist" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Specialties</label>
-              <Input placeholder="Hair, Nails, Makeup (comma separated)" value={form.specialties} onChange={(e) => setForm({ ...form, specialties: e.target.value })} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Commission %</label>
-                <Input type="number" placeholder="10" value={form.commissionRate} onChange={(e) => setForm({ ...form, commissionRate: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Monthly Salary (Rs.)</label>
-                <Input type="number" placeholder="0" value={form.baseSalary} onChange={(e) => setForm({ ...form, baseSalary: e.target.value })} />
-              </div>
+              <Input value={form.specialties} onChange={(event) => setForm({ ...form, specialties: event.target.value })} />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Commission %</label>
+              <Input type="number" value={form.commissionRate} onChange={(event) => setForm({ ...form, commissionRate: event.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Base salary</label>
+              <Input type="number" value={form.baseSalary} onChange={(event) => setForm({ ...form, baseSalary: event.target.value })} />
+            </div>
+            <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium">Bio</label>
-              <Textarea placeholder="Brief bio or description…" value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Security PIN</label>
-              <Input type="password" placeholder="4-digit PIN" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value })} />
+              <Textarea value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button disabled={loading} onClick={saveStaff}>{editing ? "Save Changes" : "Add Staff"}</Button>
+            <Button disabled={loading || !form.first_name || !form.last_name} onClick={provisionStaff}>
+              {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Provision Account
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
-      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent>
+      <Dialog open={Boolean(credentialModal)} onOpenChange={(open) => !open && setCredentialModal(null)}>
+        <DialogContent className="border-warning/50 sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Remove Staff Member</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <ShieldAlert className="h-5 w-5" />
+              One-Time Staff Credentials
+            </DialogTitle>
+            <DialogDescription>
+              Copy these temporary credentials before closing this dialog.
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Enter PIN <strong className="text-foreground">1234</strong> to permanently remove <strong className="text-foreground">{deleteTarget?.name}</strong>. This will also remove linked attendance and appointment records.
-          </p>
-          <Input type="password" placeholder="Security PIN" value={deletePin} onChange={(e) => setDeletePin(e.target.value)} />
+          <Alert className="border-warning/40 bg-warning/10">
+            <ShieldAlert className="h-4 w-4" />
+            <AlertTitle>Displayed once</AlertTitle>
+            <AlertDescription>
+              The plaintext temporary password is processed through Supabase Auth using one-way cryptographic hashing and will not be displayed again after this modal closes.
+            </AlertDescription>
+          </Alert>
+          <div className="rounded-lg border border-border bg-muted p-4 font-mono text-sm">
+            <p>Email: {credentialModal?.email}</p>
+            <p>Temporary password: {credentialModal?.temporaryPassword}</p>
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" disabled={loading} onClick={deleteStaff}>Remove Staff</Button>
+            <Button variant="outline" onClick={copyCredentials}>
+              <Copy className="h-4 w-4" />
+              Copy
+            </Button>
+            <Button onClick={() => setCredentialModal(null)}>I have stored these credentials</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
