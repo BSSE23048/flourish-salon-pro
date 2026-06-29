@@ -8,7 +8,7 @@ import DataTable, { AppointmentStatus, StatusBadge } from "@/components/DataTabl
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
@@ -261,7 +261,12 @@ export default function Dashboard() {
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
-          <DialogHeader><DialogTitle>Add Appointment</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Appointment</DialogTitle>
+            <DialogDescription className="sr-only">
+              Create a customer appointment using the current services and staff loaded from the admin API.
+            </DialogDescription>
+          </DialogHeader>
           <div className="max-h-[calc(90vh-8rem)] space-y-3 overflow-y-auto pr-1">
             <Input placeholder="Customer name" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} />
             <Input type="email" placeholder="Customer email" value={form.customerEmail} onChange={(event) => setForm({ ...form, customerEmail: event.target.value })} />
@@ -334,7 +339,7 @@ export default function Dashboard() {
         <DataTable
           columns={[
             { key: "time", label: "Time" },
-            { key: "customer", label: "Customer" },
+            { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer as string}</span> },
             { key: "service", label: "Service" },
             { key: "staff", label: "Staff" },
             { key: "status", label: "Status", render: (row) => <StatusBadge status={row.displayStatus} /> },

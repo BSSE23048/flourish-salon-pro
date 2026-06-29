@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Faculty+Glyphic&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,86 +7,206 @@
 
 @layer base {
   :root {
-    --background: 38 42% 96%;
-    --foreground: 30 18% 13%;
+    /* ── Backgrounds ── */
+    --background:         38 38% 96%;      /* #FAF7F2 */
+    --foreground:         60 4% 11%;       /* #1a1a18 */
 
-    --card: 42 45% 99%;
-    --card-foreground: 30 18% 13%;
+    /* ── Surface ── */
+    --card:               0 0% 100%;       /* white */
+    --card-foreground:    60 4% 11%;       /* #1a1a18 */
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 10%;
+    --popover:            0 0% 100%;
+    --popover-foreground: 60 4% 11%;
 
-    --primary: 145 25% 25%;
-    --primary-foreground: 0 0% 100%;
+    /* ── Brand ── */
+    --primary:            99 12% 29%;      /* #485341 (Olive green) */
+    --primary-foreground: 0 0% 100%;       /* white */
 
-    --secondary: 36 42% 91%;
-    --secondary-foreground: 22 43% 36%;
+    /* ── Secondary ── */
+    --secondary:          38 25% 92%;      /* #f0ebe3 */
+    --secondary-foreground: 60 4% 11%;
 
-    --muted: 36 38% 92%;
-    --muted-foreground: 30 12% 42%;
+    /* ── Muted ── */
+    --muted:              38 25% 92%;      /* #f0ebe3 */
+    --muted-foreground:   28 8% 46%;       /* #7a7168 */
 
-    --accent: 24 52% 90%;
-    --accent-foreground: 22 43% 36%;
+    /* ── Accent / Sage ── */
+    --accent:             38 25% 92%;      /* #f0ebe3 */
+    --accent-foreground:  60 4% 11%;
 
-    --destructive: 0 72% 51%;
+    /* ── Feedback ── */
+    --destructive:        0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%;
+    --success:            145 35% 38%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
+    --warning:            35 80% 52%;
+    --warning-foreground: 60 4% 11%;
 
-    --border: 35 29% 82%;
-    --input: 35 29% 82%;
-    --ring: 24 48% 52%;
+    /* ── Form ── */
+    --border:             35 30% 90%;      /* #e8e0d4 */
+    --input:              35 30% 90%;      /* #e8e0d4 */
+    --ring:               99 12% 29%;      /* #485341 */
 
-    --radius: 0.75rem;
+    /* ── Radius ── */
+    --radius:             1rem;            /* 16px base for premium rounded feel */
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 240 5% 34%;
-    --sidebar-primary: 252 56% 57%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 252 56% 96%;
-    --sidebar-accent-foreground: 252 56% 40%;
-    --sidebar-border: 240 6% 93%;
-    --sidebar-ring: 252 56% 57%;
+    /* ── Sidebar (dark forest green) ── */
+    --sidebar-background:          154 62% 5%;    /* #05150e */
+    --sidebar-foreground:          0 0% 100%;     /* white */
+    --sidebar-primary:             99 12% 29%;    /* #485341 */
+    --sidebar-primary-foreground:  0 0% 100%;     /* white */
+    --sidebar-accent:              99 12% 29%;    /* #485341 */
+    --sidebar-accent-foreground:   0 0% 100%;     /* white */
+    --sidebar-border:              154 62% 10%;   /* dark green subtle border */
+    --sidebar-ring:                99 12% 29%;
 
-    --chart-1: 24 48% 52%;
-    --chart-2: 145 25% 35%;
-    --chart-3: 42 42% 54%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 0 72% 51%;
+    /* ── Charts ── */
+    --chart-1: 152 28% 32%;
+    --chart-2: 82 30% 52%;
+    --chart-3: 38 60% 58%;
+    --chart-4: 35 80% 52%;
+    --chart-5: 0 55% 55%;
 
-    --shadow-sm: 0 1px 2px 0 hsl(240 10% 10% / 0.04);
-    --shadow-md: 0 4px 6px -1px hsl(240 10% 10% / 0.06), 0 2px 4px -2px hsl(240 10% 10% / 0.04);
-    --shadow-lg: 0 10px 15px -3px hsl(240 10% 10% / 0.06), 0 4px 6px -4px hsl(240 10% 10% / 0.04);
-    --shadow-card: 0 1px 3px hsl(240 10% 10% / 0.04), 0 1px 2px hsl(240 10% 10% / 0.06);
+    /* ── Shadows ── */
+    --shadow-xs:   0 1px 2px 0 hsl(25 20% 12% / 0.04);
+    --shadow-sm:   0 1px 3px 0 hsl(25 20% 12% / 0.06), 0 1px 2px -1px hsl(25 20% 12% / 0.04);
+    --shadow-md:   0 4px 8px -2px hsl(25 20% 12% / 0.07), 0 2px 4px -2px hsl(25 20% 12% / 0.04);
+    --shadow-lg:   0 12px 24px -4px hsl(25 20% 12% / 0.08), 0 4px 8px -4px hsl(25 20% 12% / 0.04);
+    --shadow-card: 0 1px 3px hsl(25 20% 12% / 0.05), 0 1px 2px hsl(25 20% 12% / 0.04);
+    --shadow-lift: 0 8px 20px -4px hsl(25 20% 12% / 0.1), 0 2px 6px -2px hsl(25 20% 12% / 0.05);
+
+    /* ── Motion ── */
+    --duration-fast:  150ms;
+    --duration-base:  250ms;
+    --duration-slow:  350ms;
+    --ease-out:       cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out:    cubic-bezier(0.45, 0, 0.55, 1);
   }
 
   * {
     @apply border-border;
   }
 
-  body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  .font-serif {
-    font-family: 'Playfair Display', Georgia, serif;
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Satoshi', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-optical-sizing: auto;
+  }
+
+  /* Editorial serif utility */
+  .font-serif,
+  .font-editorial {
+    font-family: 'EB Garamond', Georgia, serif;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
   }
 }
 
 @layer utilities {
+  /* ── Shadows ── */
   .shadow-card {
     box-shadow: var(--shadow-card);
   }
-  .shadow-card-hover {
+  .shadow-lift {
+    box-shadow: var(--shadow-lift);
+  }
+  .shadow-md-custom {
     box-shadow: var(--shadow-md);
   }
+
+  /* ── Glass effect ── */
   .glass {
-    backdrop-filter: blur(12px);
-    background: hsl(0 0% 100% / 0.8);
+    backdrop-filter: blur(16px) saturate(180%);
+    background: hsl(40 30% 99% / 0.85);
+    border: 1px solid hsl(35 22% 88% / 0.6);
   }
+
+  /* ── Surface ── */
+  .surface {
+    @apply bg-card border border-border rounded-xl shadow-card;
+  }
+  .surface-elevated {
+    @apply bg-card border border-border rounded-2xl;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* ── Text utilities ── */
+  .font-editorial {
+    font-family: 'Faculty Glyphic', Georgia, serif;
+    font-weight: 400;
+  }
+  
+  .text-editorial {
+    font-family: 'Faculty Glyphic', Georgia, serif;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+  }
+
+  .text-editorial-light {
+    font-family: 'Faculty Glyphic', Georgia, serif;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+  }
+
+  /* ── Transitions ── */
+  .transition-base {
+    transition: all var(--duration-base) var(--ease-out);
+  }
+  .transition-fast {
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+  .transition-slow {
+    transition: all var(--duration-slow) var(--ease-out);
+  }
+
+  /* ── Animations ── */
+  .animate-fade-in {
+    animation: fade-in var(--duration-base) var(--ease-out) both;
+  }
+  .animate-fade-up {
+    animation: fade-up var(--duration-slow) var(--ease-out) both;
+  }
+  .animate-scale-in {
+    animation: scale-in var(--duration-base) var(--ease-out) both;
+  }
+  .animate-slide-in-left {
+    animation: slide-in-left var(--duration-slow) var(--ease-out) both;
+  }
+
+  /* ── Focus ring ── */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* ── Stagger children ── */
+  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+  .stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+  .stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+  .stagger-children > *:nth-child(5) { animation-delay: 240ms; }
 }
