@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform } from 'framer-motion';
+import type { MotionValue } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 
 const DRAG_BUFFER = 0;
@@ -17,7 +18,34 @@ export interface CarouselItemProps {
   category: string;
 }
 
-function CarouselCard({ item, index, itemWidth, trackItemOffset, x, transition, onBook }: any) {
+type CarouselTransition = typeof SPRING_OPTIONS | { duration: number };
+
+type CarouselCardProps = {
+  item: CarouselItemProps;
+  index: number;
+  itemWidth: number;
+  trackItemOffset: number;
+  x: MotionValue<number>;
+  transition: CarouselTransition;
+  onBook?: () => void;
+};
+
+type CarouselProps = {
+  items?: CarouselItemProps[];
+  baseWidth?: number;
+  autoplay?: boolean;
+  autoplayDelay?: number;
+  pauseOnHover?: boolean;
+  loop?: boolean;
+  onBook?: () => void;
+};
+
+type DragInfo = {
+  offset: { x: number };
+  velocity: { x: number };
+};
+
+function CarouselCard({ item, index, itemWidth, trackItemOffset, x, transition, onBook }: CarouselCardProps) {
   const range = [-(index + 1) * trackItemOffset, -index * trackItemOffset, -(index - 1) * trackItemOffset];
   const outputRange = [40, 0, -40]; 
   const rotateY = useTransform(x, range, outputRange, { clamp: true });
@@ -45,7 +73,7 @@ function CarouselCard({ item, index, itemWidth, trackItemOffset, x, transition, 
           src={item.imageUrl || "/Hero_sec.png"} 
           alt={item.name}
           className="w-full h-full object-cover"
-          onError={(e: any) => { e.currentTarget.src = "/Hero_sec.png"; }}
+          onError={(e: React.SyntheticEvent<HTMLImageElement>) => { e.currentTarget.src = "/Hero_sec.png"; }}
           whileHover={{ scale: 1.08 }} 
           transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         />
@@ -87,7 +115,7 @@ export default function Carousel({
   pauseOnHover = true,
   loop = false,
   onBook
-}: any) {
+}: CarouselProps) {
   const [actualBaseWidth, setActualBaseWidth] = useState(baseWidth);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -193,7 +221,7 @@ export default function Carousel({
     setIsAnimating(false);
   };
 
-  const handleDragEnd = (_: any, info: any) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: DragInfo) => {
     const { offset, velocity } = info;
     const direction =
       offset.x < -DRAG_BUFFER || velocity.x < -VELOCITY_THRESHOLD

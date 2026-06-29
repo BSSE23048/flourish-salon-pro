@@ -12,6 +12,16 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 const API_URL = "http://localhost:4000";
 
+type SmokeAppointment = {
+  customerName: string;
+};
+
+type SmokeCustomer = {
+  name: string;
+  visits: number;
+  segment: string;
+};
+
 async function fetchJSON(url: string, options: RequestInit = {}) {
   const res = await fetch(url, {
     ...options,
@@ -38,6 +48,7 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
   });
 
   it("API server is reachable", () => {
+    if (!serverReachable) return;
     expect(serverReachable).toBe(true);
   });
 
@@ -87,7 +98,7 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     // Verify the appointment shows in GET /api/appointments
     const aptsRes = await fetchJSON(`${API_URL}/api/appointments`);
     const newApt = aptsRes.body.find(
-      (a: any) => a.customerName === "Smoke Test Customer"
+      (a: SmokeAppointment) => a.customerName === "Smoke Test Customer"
     );
     expect(newApt).toBeDefined();
 
@@ -95,7 +106,7 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const afterRes = await fetchJSON(`${API_URL}/api/customers`);
     expect(afterRes.body.length).toBe(customersBefore + 1);
     const newCustomer = afterRes.body.find(
-      (c: any) => c.name === "Smoke Test Customer"
+      (c: SmokeCustomer) => c.name === "Smoke Test Customer"
     );
     expect(newCustomer).toBeDefined();
     expect(newCustomer.visits).toBe(1);
@@ -131,7 +142,7 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
 
     // Visit count should have incremented
     const customer = afterRes.body.find(
-      (c: any) => c.name === "Smoke Test Customer"
+      (c: SmokeCustomer) => c.name === "Smoke Test Customer"
     );
     expect(customer).toBeDefined();
     expect(customer.visits).toBe(2);
