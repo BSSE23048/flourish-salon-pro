@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setDemoSession = useCallback((email = DEMO_EMAIL, fullName = "Salon Admin", nextRole: AppRole = "owner") => {
     const demoUser = { id: "demo-user", email };
-    const demoSession = { user: demoUser, access_token: "demo-access-token" };
+    const demoSession = { user: demoUser, access_token: nextRole === "staff" ? "flourish-demo-staff" : "flourish-demo-admin" };
     setSession(demoSession);
     setUser(demoUser);
     setProfile({ full_name: fullName, email });

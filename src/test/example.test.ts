@@ -22,6 +22,12 @@ vi.mock("sonner", () => ({
   toast: mocks.toast,
 }));
 
+vi.mock("@/lib/api", () => ({
+  API_UNAVAILABLE_MESSAGE: "Could not reach the API server at http://localhost:4000.",
+  API_URL: "http://localhost:4000",
+  getAuthHeaders: vi.fn(async (extra = {}) => ({ ...extra, Authorization: "Bearer flourish-demo-staff" })),
+}));
+
 type MockResponse = Pick<Response, "ok" | "json">;
 
 const apiResponse = (body: unknown, ok = true): MockResponse => ({
@@ -36,6 +42,7 @@ const schedule = (overrides = {}) => ({
   attendancePercentage: 82,
   commission: 12500,
   revenue: 84000,
+  payroll: { payable: 12500, paid: false },
   appointments: [
     {
       id: "apt-1",
@@ -79,7 +86,7 @@ describe("StaffPortal dashboard", () => {
     expect(screen.getByText("amina@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("arrived")).toHaveLength(2);
     expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/staff/me/schedule", {
-      headers: { "x-role": "staff", "x-staff-id": "stf-sara" },
+      headers: { Authorization: "Bearer flourish-demo-staff" },
     });
   });
 
@@ -95,7 +102,7 @@ describe("StaffPortal dashboard", () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/staff/me/leave", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": "stf-sara" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer flourish-demo-staff" },
         body: expect.stringContaining("Family commitment"),
       });
     });
@@ -125,7 +132,7 @@ describe("StaffPortal dashboard", () => {
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Appointment is already closed"));
     expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/appointments/apt-1/status", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "x-role": "staff", "x-staff-id": "stf-sara" },
+      headers: { "Content-Type": "application/json", Authorization: "Bearer flourish-demo-staff" },
       body: JSON.stringify({ status: "completed" }),
     });
   });

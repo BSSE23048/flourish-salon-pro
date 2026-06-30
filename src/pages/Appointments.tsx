@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -54,17 +54,30 @@ export default function Appointments() {
       fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
     ]);
     const [ad, sd, std] = await Promise.all([ar.json(), sr.json(), str.json()]);
+    if (!ar.ok) throw new Error(ad.error || "Could not load appointments");
+    if (!sr.ok) throw new Error(sd.error || "Could not load services");
+    if (!str.ok) throw new Error(std.error || "Could not load staff");
+    if (!Array.isArray(ad) || !Array.isArray(sd) || !Array.isArray(std)) {
+      throw new Error("The API returned an unexpected dashboard payload");
+    }
     setAppointments(ad);
     setServices(sd);
     setStaff(std);
     setForm((f) => ({ ...f, serviceId: f.serviceId || sd[0]?.id || "", staffId: f.staffId || std[0]?.id || "" }));
   };
 
-  useEffect(() => { loadData().catch(() => toast.error("Could not load appointments")); }, []);
+  useEffect(() => {
+    loadData().catch((error) => {
+      toast.error(error instanceof TypeError ? API_UNAVAILABLE_MESSAGE : error instanceof Error ? error.message : "Could not load appointments");
+    });
+  }, []);
 
   useEffect(() => {
     const socket: Socket = io(API_URL, SOCKET_OPTIONS);
-    socket.on("appointments:update", setAppointments);
+    socket.on("appointments:update", (payload: Appointment[]) => {
+      if (Array.isArray(payload)) setAppointments(payload);
+      else loadData();
+    });
     socket.on("staff:update", loadData);
     return () => { socket.disconnect(); };
   }, []);

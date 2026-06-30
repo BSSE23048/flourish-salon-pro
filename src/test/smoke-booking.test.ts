@@ -7,10 +7,14 @@
  * 3. GET /api/customers includes the auto-created customer
  * 4. POST /api/customers creates a customer directly
  * 5. POST /api/bookings for an existing customer increments visits (not duplicate)
+ *
+ * Opt in with RUN_API_SMOKE_TESTS=true because this suite mutates a live API.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 
 const API_URL = "http://localhost:4000";
+const runLiveApiSmoke = process.env.RUN_API_SMOKE_TESTS === "true";
+const describeLiveApi = runLiveApiSmoke ? describe : describe.skip;
 
 type SmokeAppointment = {
   customerName: string;
@@ -35,7 +39,7 @@ async function fetchJSON(url: string, options: RequestInit = {}) {
   return { status: res.status, ok: res.ok, body };
 }
 
-describe("Smoke tests: Appointment booking & customer sync", () => {
+describeLiveApi("Smoke tests: Appointment booking & customer sync", () => {
   let serverReachable = false;
 
   beforeAll(async () => {

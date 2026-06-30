@@ -31,6 +31,16 @@ vi.mock("sonner", () => ({
   toast: mocks.toast,
 }));
 
+vi.mock("@/lib/api", () => ({
+  API_UNAVAILABLE_MESSAGE: "Could not reach the API server at http://localhost:4000.",
+  API_URL: "http://localhost:4000",
+  SOCKET_OPTIONS: {
+    reconnectionAttempts: 1,
+    timeout: 1500,
+  },
+  getAuthHeaders: vi.fn(async (extra = {}) => ({ ...extra, Authorization: "Bearer flourish-demo-admin" })),
+}));
+
 type MockResponse = Pick<Response, "ok" | "json">;
 
 const apiResponse = (body: unknown, ok = true): MockResponse => ({
@@ -122,8 +132,8 @@ describe("Admin dashboard smoke and regression", () => {
     expect(screen.getByText("Sara Ahmed")).toBeInTheDocument();
     expect(screen.getByText(/invoice INV-1 generated/i)).toBeInTheDocument();
 
-    expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/metrics", { headers: { "x-role": "admin" } });
-    expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/payroll?month=" + today().slice(0, 7), { headers: { "x-role": "admin" } });
+    expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/admin/metrics", { headers: { Authorization: "Bearer flourish-demo-admin" } });
+    expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/payroll?month=" + today().slice(0, 7), { headers: { Authorization: "Bearer flourish-demo-admin" } });
   });
 
   it("regression creates appointments using API service and staff IDs", async () => {
@@ -155,7 +165,7 @@ describe("Admin dashboard smoke and regression", () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("http://localhost:4000/api/appointments", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer flourish-demo-admin" },
         body: JSON.stringify({
           customerName: "New Client",
           customerEmail: "new@example.com",

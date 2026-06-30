@@ -167,8 +167,8 @@ describe("CustomerPortal smoke and regression", () => {
     await screen.findByText("Signature Haircut");
     fireEvent.click(screen.getAllByRole("button", { name: /book appointment/i })[0]);
 
-    expect(await screen.findByRole("heading", { name: /sign in to book/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /continue with google/i }));
+    expect(await screen.findByRole("heading", { name: /client login/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /login with google/i }));
 
     await waitFor(() => {
       expect(mocks.signInWithOAuth).toHaveBeenCalledWith({

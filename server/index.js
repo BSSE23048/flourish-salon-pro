@@ -12,6 +12,12 @@ const app = express();
 const server = http.createServer(app);
 const port = Number(process.env.PORT || 4000);
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const configuredClientOrigins = new Set(
+  clientOrigin
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
   process.env.SUPABASE_ANON_KEY ||
@@ -22,6 +28,29 @@ const supabaseServerKey = supabaseServiceRoleKey || process.env.SUPABASE_SECRET_
 const defaultTenantId = process.env.DEFAULT_TENANT_ID || "00000000-0000-0000-0000-000000000001";
 const demoAuthEnabled = process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO_AUTH !== "false";
 const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && supabaseServerKey);
+
+function isPrivateDevOrigin(origin) {
+  if (process.env.NODE_ENV === "production") return false;
+  try {
+    const { hostname, port: originPort, protocol } = new URL(origin);
+    const allowedProtocol = protocol === "http:" || protocol === "https:";
+    const allowedPort = !originPort || originPort === "3000";
+    const privateHost =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+    return allowedProtocol && allowedPort && privateHost;
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedOrigin(origin) {
+  return !origin || configuredClientOrigins.has(origin) || isPrivateDevOrigin(origin);
+}
 
 if (!supabaseConfigured && !demoAuthEnabled) {
   throw new Error("Missing Supabase environment. Set SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL, SUPABASE_ANON_KEY/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY.");
@@ -40,7 +69,12 @@ const supabaseVerifier = supabaseConfigured ? createClient(supabaseUrl, supabase
 }) : null;
 
 const io = new Server(server, {
-  cors: { origin: clientOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
+  cors: {
+    origin(origin, callback) {
+      callback(null, isAllowedOrigin(origin));
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+  },
 });
 
 const restrictedLimiter = rateLimit({
@@ -62,7 +96,7 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || origin === clientOrigin) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
       return;
     }
@@ -70,7 +104,7 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(generalLimiter);
 app.use(["/api/holds", "/api/bookings", "/api/login", "/api/signup"], restrictedLimiter);
 
@@ -129,6 +163,7 @@ const demoServiceRows = [
     duration_minutes: 30,
     price_cents: 350000,
     deposit_cents: 100000,
+    image_url: "/Hero_sec.png",
     active: true,
   },
   {
@@ -139,9 +174,13 @@ const demoServiceRows = [
     duration_minutes: 60,
     price_cents: 650000,
     deposit_cents: 150000,
+    image_url: "/Hero_sec.png",
     active: true,
   },
 ];
+
+const demoAppointmentRows = [];
+const demoInvoiceRows = [];
 
 function canUseDemoFallback(req) {
   return demoAuthEnabled && req.user?.accessToken?.startsWith("flourish-demo-");
@@ -219,6 +258,18 @@ function normalizeRole(value) {
   return "client";
 }
 
+function attachDemoUser(req, roleHint = "admin") {
+  const demoRole = normalizeRole(roleHint) === "staff" ? "staff" : "admin";
+  req.user = {
+    id: demoRole === "staff" ? "00000000-0000-0000-0000-00000000faff" : "00000000-0000-0000-0000-00000000ad00",
+    email: demoRole === "staff" ? "staff@flourish.local" : "admin@flourish.local",
+    role: demoRole,
+    tenantId: defaultTenantId,
+    staffId: demoRole === "staff" ? "stf-sara" : null,
+    accessToken: `flourish-demo-${demoRole}`,
+  };
+}
+
 function getIp(req) {
   return String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
 }
@@ -265,25 +316,31 @@ async function getRoleAndTenant(userId, rawUser) {
 async function verifySupabaseToken(req, res, next) {
   const publicRead =
     req.method === "GET" &&
-    ["/services", "/staff", "/availability", "/api/services", "/api/staff", "/api/availability"].includes(req.path);
+    (
+      req.path === "/availability" ||
+      req.path === "/api/availability" ||
+      req.path === "/staff" ||
+      req.path === "/api/staff" ||
+      req.path === "/services" ||
+      req.path === "/api/services" ||
+      req.path.startsWith("/services/") ||
+      req.path.startsWith("/api/services/")
+    );
   if (publicRead) return next();
 
   const token = getBearerToken(req);
   if (!token) {
+    const legacyRole = req.header("x-role");
+    if (demoAuthEnabled && legacyRole) {
+      attachDemoUser(req, legacyRole);
+      return next();
+    }
     await auditLog(req, "AUTH_TOKEN_MISSING", { path: req.path }).catch(() => undefined);
     return res.status(401).json({ error: "Bearer authorization token is required" });
   }
 
   if (demoAuthEnabled && token.startsWith("flourish-demo-")) {
-    const demoRole = token === "flourish-demo-staff" ? "staff" : "admin";
-    req.user = {
-      id: demoRole === "staff" ? "00000000-0000-0000-0000-00000000faff" : "00000000-0000-0000-0000-00000000ad00",
-      email: demoRole === "staff" ? "staff@flourish.local" : "admin@flourish.local",
-      role: demoRole,
-      tenantId: defaultTenantId,
-      staffId: demoRole === "staff" ? "stf-sara" : null,
-      accessToken: token,
-    };
+    attachDemoUser(req, token === "flourish-demo-staff" ? "staff" : "admin");
     return next();
   }
 
@@ -341,6 +398,16 @@ function moneyNumber(value) {
   return fromCents(value);
 }
 
+function slugIdPart(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-");
+}
+
 function splitName(firstName, lastName) {
   const first = String(firstName || "").trim();
   const last = String(lastName || "").trim();
@@ -391,6 +458,43 @@ async function generateAvailableStaffEmail(firstName, lastName) {
   throw new Error("Could not generate an available staff email");
 }
 
+function generateDemoStaffEmail(firstName, lastName) {
+  const base = `${slugEmailPart(firstName)}.${slugEmailPart(lastName)}`.replace(/\.+/g, ".") || "staff";
+  const existingEmails = new Set(demoStaffRows.map((member) => String(member.email || "").toLowerCase()));
+  for (let suffix = 0; suffix < 1000; suffix += 1) {
+    const email = `${base}${suffix === 0 ? "" : suffix}@flourish.local`;
+    if (!existingEmails.has(email.toLowerCase())) return email;
+  }
+  return `staff.${Date.now()}@flourish.local`;
+}
+
+function createDemoStaff(req) {
+  const { first, last, fullName } = splitName(req.body.first_name, req.body.last_name);
+  const email = generateDemoStaffEmail(first, last);
+  const temporaryPassword = generateTemporaryPassword();
+  const specialties = Array.isArray(req.body.specialties)
+    ? req.body.specialties.map(String).filter(Boolean)
+    : String(req.body.specialties || "Hair").split(",").map((item) => item.trim()).filter(Boolean);
+  const staff = {
+    id: `stf-${slugEmailPart(first) || "staff"}-${Date.now().toString(36)}`,
+    user_id: crypto.randomUUID(),
+    first_name: first,
+    last_name: last,
+    full_name: fullName,
+    email,
+    title: String(req.body.title || "Stylist").trim(),
+    specialties: specialties.length ? specialties : ["Hair"],
+    commission_rate: Number(req.body.commissionRate || req.body.commission_rate || 10),
+    base_salary_cents: toCents(req.body.baseSalary || req.body.base_salary || 0),
+    availability_status: "online",
+    bio: String(req.body.bio || ""),
+    active: true,
+    must_reset_password: true,
+  };
+  demoStaffRows.push(staff);
+  return { staff, credentials: { email, temporaryPassword } };
+}
+
 function mapStaff(row) {
   return {
     id: row.id,
@@ -422,8 +526,71 @@ function mapService(row) {
     durationMinutes: row.duration_minutes,
     price: moneyNumber(row.price_cents),
     deposit: moneyNumber(row.deposit_cents),
+    imageUrl: row.image_url || row.imageUrl || "/Hero_sec.png",
     active: row.active,
   };
+}
+
+function normalizeServicePayload(body, existing = {}) {
+  const name = String(body.name || existing.name || "").trim();
+  const category = String(body.category || existing.category || "Hair").trim();
+  if (!name) throw new Error("Service name is required");
+  return {
+    name,
+    category,
+    description: String(body.description ?? existing.description ?? ""),
+    duration_minutes: Math.max(5, Number(body.durationMinutes ?? body.duration_minutes ?? existing.duration_minutes ?? 30)),
+    price_cents: toCents(body.price ?? body.price_cents ?? moneyNumber(existing.price_cents || 0)),
+    deposit_cents: toCents(body.deposit ?? body.deposit_cents ?? moneyNumber(existing.deposit_cents || 0)),
+    image_url: String(body.imageUrl || body.image_url || existing.image_url || "/Hero_sec.png"),
+    active: body.active === undefined ? existing.active ?? true : Boolean(body.active),
+  };
+}
+
+function createDemoService(body) {
+  const payload = normalizeServicePayload(body);
+  const baseId = `svc-${slugIdPart(payload.name) || "service"}`;
+  let id = baseId;
+  for (let suffix = 1; demoServiceRows.some((service) => service.id === id); suffix += 1) {
+    id = `${baseId}-${suffix}`;
+  }
+  const service = { id, ...payload };
+  demoServiceRows.push(service);
+  return service;
+}
+
+function createDemoAppointment(req) {
+  const service = demoServiceRows.find((item) => item.id === req.body.serviceId);
+  if (!service) {
+    const error = new Error("Service not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  const staff = demoStaffRows.find((item) => item.id === req.body.staffId);
+  if (!staff) {
+    const error = new Error("Staff member not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  const startAt = req.body.startAt ? new Date(req.body.startAt) : new Date(`${req.body.date}T${req.body.time}:00`);
+  const endAt = new Date(startAt.getTime() + Number(service.duration_minutes || 30) * 60_000);
+  const appointment = {
+    id: `apt-${Date.now().toString(36)}`,
+    tenant_id: req.user?.tenantId || defaultTenantId,
+    client_id: req.user?.role === "client" ? req.user.id : null,
+    customer_name: String(req.body.customerName || "Walk-in Client"),
+    customer_email: String(req.body.customerEmail || req.user?.email || "walk-in@flourish.local"),
+    staff_id: req.body.staffId,
+    service_id: req.body.serviceId,
+    start_at: startAt.toISOString(),
+    end_at: endAt.toISOString(),
+    status: req.body.status || "booked",
+    deposit_required_cents: Number(service.deposit_cents || 0),
+    deposit_paid: Boolean(req.body.depositPaid),
+    notes: String(req.body.notes || ""),
+  };
+  demoAppointmentRows.push(appointment);
+  return appointment;
 }
 
 function mapAppointment(row) {
@@ -440,6 +607,71 @@ function mapAppointment(row) {
     depositPaid: row.deposit_paid,
     notes: row.notes,
   };
+}
+
+function mapInvoice(invoice) {
+  return {
+    id: invoice.invoice_number || invoice.id,
+    date: String(invoice.created_at || new Date().toISOString()).slice(0, 10),
+    customer: invoice.customer_name,
+    customerEmail: invoice.customer_email,
+    payment: invoice.payment_method,
+    status: invoice.status === "paid" ? "Paid" : invoice.status,
+    subtotal: moneyNumber(invoice.subtotal_cents),
+    discount: moneyNumber(invoice.discount_cents),
+    total: moneyNumber(invoice.total_cents),
+    createdAt: invoice.created_at,
+    items: (invoice.invoice_line_items || []).map((item) => ({
+      serviceId: item.service_id || "other",
+      staffId: item.staff_id,
+      name: item.description,
+      quantity: item.quantity,
+      unitPrice: moneyNumber(item.unit_amount_cents),
+      total: moneyNumber(item.amount_cents),
+      custom: !item.service_id,
+    })),
+  };
+}
+
+function normalizeInvoiceItems(req) {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  return items.map((item) => {
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const unitAmountCents = toCents(item.unitPrice || 0);
+    return {
+      tenant_id: req.user.tenantId,
+      staff_id: item.staffId || null,
+      service_id: item.serviceId === "other" ? null : item.serviceId,
+      description: String(item.name || "Service"),
+      quantity,
+      unit_amount_cents: unitAmountCents,
+      amount_cents: quantity * unitAmountCents,
+    };
+  });
+}
+
+function createDemoInvoice(req) {
+  const normalizedItems = normalizeInvoiceItems(req);
+  const subtotalCents = normalizedItems.reduce((sum, item) => sum + item.amount_cents, 0);
+  const discountCents = toCents(req.body.discount || 0);
+  const totalCents = Math.max(0, subtotalCents - discountCents);
+  const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
+  const invoice = {
+    id: `inv-${Date.now().toString(36)}`,
+    invoice_number: invoiceNumber,
+    tenant_id: req.user.tenantId,
+    customer_name: req.body.customer,
+    customer_email: req.body.customerEmail || "walk-in@flourish.local",
+    payment_method: req.body.payment || "Cash",
+    status: String(req.body.status || "Paid").toLowerCase(),
+    subtotal_cents: subtotalCents,
+    discount_cents: discountCents,
+    total_cents: totalCents,
+    created_at: new Date().toISOString(),
+    invoice_line_items: normalizedItems,
+  };
+  demoInvoiceRows.unshift(invoice);
+  return invoice;
 }
 
 app.get("/api/health", (_req, res) => {
@@ -466,6 +698,137 @@ app.get("/api/services", asyncHandler(async (req, res) => {
     return res.json(data.map(mapService));
   } catch (error) {
     if (demoAuthEnabled) return res.json(demoServiceRows.map(mapService));
+    throw error;
+  }
+}));
+
+app.get("/api/services/:id", asyncHandler(async (req, res) => {
+  const demoService = demoServiceRows.find((service) => service.id === req.params.id);
+  if (!supabase) {
+    if (!demoService) return res.status(404).json({ error: "Service not found" });
+    return res.json(mapService(demoService));
+  }
+
+  const tenantId = req.user?.tenantId || defaultTenantId;
+  try {
+    const { data, error } = await supabase
+      .from("services")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", req.params.id)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      if (demoService && demoAuthEnabled) return res.json(mapService(demoService));
+      return res.status(404).json({ error: "Service not found" });
+    }
+    return res.json(mapService(data));
+  } catch (error) {
+    if (demoService && demoAuthEnabled) return res.json(mapService(demoService));
+    throw error;
+  }
+}));
+
+app.post("/api/services", requireRole("admin"), asyncHandler(async (req, res) => {
+  if (canUseDemoFallback(req) || !supabase) {
+    const service = createDemoService(req.body);
+    io.emit("services:update", mapService(service));
+    return res.status(201).json(mapService(service));
+  }
+
+  try {
+    const payload = normalizeServicePayload(req.body);
+    const { data, error } = await supabase
+      .from("services")
+      .insert({ tenant_id: req.user.tenantId, ...payload })
+      .select("*")
+      .single();
+    if (error) throw error;
+    await auditLog(req, "SERVICE_CREATED", { serviceId: data.id });
+    io.emit("services:update", mapService(data));
+    return res.status(201).json(mapService(data));
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const service = createDemoService(req.body);
+      io.emit("services:update", mapService(service));
+      return res.status(201).json(mapService(service));
+    }
+    throw error;
+  }
+}));
+
+app.patch("/api/services/:id", requireRole("admin"), asyncHandler(async (req, res) => {
+  const demoIndex = demoServiceRows.findIndex((service) => service.id === req.params.id);
+  if (canUseDemoFallback(req) || !supabase) {
+    if (demoIndex === -1) return res.status(404).json({ error: "Service not found" });
+    demoServiceRows[demoIndex] = { ...demoServiceRows[demoIndex], ...normalizeServicePayload(req.body, demoServiceRows[demoIndex]) };
+    io.emit("services:update", mapService(demoServiceRows[demoIndex]));
+    return res.json(mapService(demoServiceRows[demoIndex]));
+  }
+
+  try {
+    const { data: existing, error: existingError } = await supabase
+      .from("services")
+      .select("*")
+      .eq("tenant_id", req.user.tenantId)
+      .eq("id", req.params.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existing) return res.status(404).json({ error: "Service not found" });
+
+    const payload = normalizeServicePayload(req.body, existing);
+    const { data, error } = await supabase
+      .from("services")
+      .update(payload)
+      .eq("tenant_id", req.user.tenantId)
+      .eq("id", req.params.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    await auditLog(req, "SERVICE_UPDATED", { serviceId: data.id });
+    io.emit("services:update", mapService(data));
+    return res.json(mapService(data));
+  } catch (error) {
+    if (demoIndex !== -1 && demoAuthEnabled) {
+      demoServiceRows[demoIndex] = { ...demoServiceRows[demoIndex], ...normalizeServicePayload(req.body, demoServiceRows[demoIndex]) };
+      io.emit("services:update", mapService(demoServiceRows[demoIndex]));
+      return res.json(mapService(demoServiceRows[demoIndex]));
+    }
+    throw error;
+  }
+}));
+
+app.delete("/api/services/:id", requireRole("admin"), asyncHandler(async (req, res) => {
+  const demoIndex = demoServiceRows.findIndex((service) => service.id === req.params.id);
+  if (canUseDemoFallback(req) || !supabase) {
+    if (demoIndex === -1) return res.status(404).json({ error: "Service not found" });
+    const [service] = demoServiceRows.splice(demoIndex, 1);
+    io.emit("services:update", { id: service.id, deleted: true });
+    return res.json({ ok: true, id: service.id });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("services")
+      .update({ active: false, deleted_at: new Date().toISOString() })
+      .eq("tenant_id", req.user.tenantId)
+      .eq("id", req.params.id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Service not found" });
+    await auditLog(req, "SERVICE_DELETED", { serviceId: data.id });
+    io.emit("services:update", { id: data.id, deleted: true });
+    return res.json({ ok: true, id: data.id });
+  } catch (error) {
+    if (demoIndex !== -1 && demoAuthEnabled) {
+      const [service] = demoServiceRows.splice(demoIndex, 1);
+      io.emit("services:update", { id: service.id, deleted: true });
+      return res.json({ ok: true, id: service.id });
+    }
     throw error;
   }
 }));
@@ -540,6 +903,20 @@ app.get("/api/availability", asyncHandler(async (req, res) => {
 
 app.post("/api/holds", requireRole("client", "admin"), asyncHandler(async (req, res) => {
   const startAt = req.body.startAt ? new Date(req.body.startAt) : new Date(`${req.body.date}T${req.body.time}:00`);
+  if (canUseDemoFallback(req) || !supabase) {
+    const service = demoServiceRows.find((item) => item.id === req.body.serviceId);
+    if (!service) return res.status(404).json({ error: "Service not found" });
+    const endAt = new Date(startAt.getTime() + Number(service.duration_minutes || 30) * 60_000);
+    return res.status(201).json({
+      id: `hold-${Date.now().toString(36)}`,
+      staffId: req.body.staffId,
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+      expiresAt: new Date(Date.now() + 7 * 60_000).toISOString(),
+      status: "active",
+    });
+  }
+
   const { data: service, error: serviceError } = await supabase.from("services").select("duration_minutes").eq("tenant_id", req.user.tenantId).eq("id", req.body.serviceId).single();
   if (serviceError) return res.status(404).json({ error: "Service not found" });
   const endAt = new Date(startAt.getTime() + Number(service.duration_minutes || 30) * 60_000);
@@ -565,6 +942,20 @@ app.post("/api/holds", requireRole("client", "admin"), asyncHandler(async (req, 
 }));
 
 app.post("/api/waitlist", requireRole("client", "admin"), asyncHandler(async (req, res) => {
+  if (canUseDemoFallback(req) || !supabase) {
+    const payload = {
+      id: `wait-${Date.now().toString(36)}`,
+      customerName: req.body.customerName,
+      customerEmail: req.user.email,
+      staffId: req.body.staffId,
+      serviceId: req.body.serviceId,
+      desiredStartAt: req.body.startAt,
+      status: "waiting",
+    };
+    io.emit("waitlist:update", payload);
+    return res.status(201).json(payload);
+  }
+
   const { data, error } = await supabase
     .from("waitlist_entries")
     .insert({
@@ -585,48 +976,71 @@ app.post("/api/waitlist", requireRole("client", "admin"), asyncHandler(async (re
 }));
 
 app.post("/api/staff", requireRole("admin"), asyncHandler(async (req, res) => {
+  if (canUseDemoFallback(req) || !supabase) {
+    const demo = createDemoStaff(req);
+    io.emit("staff:update", mapStaff(demo.staff));
+    return res.status(201).json({ staff: mapStaff(demo.staff), credentials: demo.credentials, demo: true });
+  }
+
   const { first, last, fullName } = splitName(req.body.first_name, req.body.last_name);
-  const email = await generateAvailableStaffEmail(first, last);
-  const temporaryPassword = generateTemporaryPassword();
-  const title = String(req.body.title || "Stylist").trim();
-  const specialties = Array.isArray(req.body.specialties)
-    ? req.body.specialties.map(String).filter(Boolean)
-    : String(req.body.specialties || "Hair").split(",").map((item) => item.trim()).filter(Boolean);
+  let createdAuthUserId = null;
 
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email,
-    password: temporaryPassword,
-    email_confirm: true,
-    app_metadata: { role: "staff", tenant_id: req.user.tenantId },
-    user_metadata: { full_name: fullName, role: "staff" },
-  });
-  if (authError || !authData.user) throw authError || new Error("Supabase Auth did not return a user");
+  try {
+    const email = await generateAvailableStaffEmail(first, last);
+    const temporaryPassword = generateTemporaryPassword();
+    const title = String(req.body.title || "Stylist").trim();
+    const specialties = Array.isArray(req.body.specialties)
+      ? req.body.specialties.map(String).filter(Boolean)
+      : String(req.body.specialties || "Hair").split(",").map((item) => item.trim()).filter(Boolean);
 
-  const { data: staff, error: staffError } = await supabase
-    .from("staff")
-    .insert({
-      tenant_id: req.user.tenantId,
-      user_id: authData.user.id,
-      first_name: first,
-      last_name: last,
-      full_name: fullName,
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
-      title,
-      specialties,
-      commission_rate: Number(req.body.commissionRate || req.body.commission_rate || 10),
-      base_salary_cents: toCents(req.body.baseSalary || req.body.base_salary || 0),
-      bio: String(req.body.bio || ""),
-      availability_status: "online",
-      must_reset_password: true,
-    })
-    .select("*")
-    .single();
-  if (staffError) throw staffError;
+      password: temporaryPassword,
+      email_confirm: true,
+      app_metadata: { role: "staff", tenant_id: req.user.tenantId },
+      user_metadata: { full_name: fullName, role: "staff" },
+    });
+    if (authError || !authData.user) throw authError || new Error("Supabase Auth did not return a user");
+    createdAuthUserId = authData.user.id;
 
-  await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "staff", tenant_id: req.user.tenantId });
-  await auditLog(req, "STAFF_PROVISIONED", { staffId: staff.id, email });
-  io.emit("staff:update", mapStaff(staff));
-  res.status(201).json({ staff: mapStaff(staff), credentials: { email, temporaryPassword } });
+    const { data: staff, error: staffError } = await supabase
+      .from("staff")
+      .insert({
+        tenant_id: req.user.tenantId,
+        user_id: authData.user.id,
+        first_name: first,
+        last_name: last,
+        full_name: fullName,
+        email,
+        title,
+        specialties,
+        commission_rate: Number(req.body.commissionRate || req.body.commission_rate || 10),
+        base_salary_cents: toCents(req.body.baseSalary || req.body.base_salary || 0),
+        bio: String(req.body.bio || ""),
+        availability_status: "online",
+        must_reset_password: true,
+      })
+      .select("*")
+      .single();
+    if (staffError) throw staffError;
+
+    const { error: roleError } = await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "staff", tenant_id: req.user.tenantId });
+    if (roleError) throw roleError;
+
+    await auditLog(req, "STAFF_PROVISIONED", { staffId: staff.id, email });
+    io.emit("staff:update", mapStaff(staff));
+    return res.status(201).json({ staff: mapStaff(staff), credentials: { email, temporaryPassword } });
+  } catch (error) {
+    if (createdAuthUserId) {
+      await supabase.auth.admin.deleteUser(createdAuthUserId).catch(() => undefined);
+    }
+    if (demoAuthEnabled) {
+      const demo = createDemoStaff(req);
+      io.emit("staff:update", mapStaff(demo.staff));
+      return res.status(201).json({ staff: mapStaff(demo.staff), credentials: demo.credentials, demo: true });
+    }
+    throw error;
+  }
 }));
 
 app.post("/api/staff/:staffId/force-password-reset", requireRole("admin"), asyncHandler(async (req, res) => {
@@ -676,51 +1090,98 @@ app.post("/api/staff/:staffId/force-password-reset", requireRole("admin"), async
 }));
 
 app.get("/api/appointments", requireRole("admin", "staff"), requireStaffIsolation, asyncHandler(async (req, res) => {
-  let query = supabase.from("appointments").select("*").eq("tenant_id", req.user.tenantId).order("start_at", { ascending: true });
-  if (req.user.role === "staff") query = query.eq("staff_id", req.user.staffId);
-  const { data, error } = await query;
-  if (error) throw error;
-  res.json(data.map(mapAppointment));
+  if (canUseDemoFallback(req) || !supabase) {
+    const rows = req.user.role === "staff" ? demoAppointmentRows.filter((item) => item.staff_id === req.user.staffId) : demoAppointmentRows;
+    return res.json(rows.map(mapAppointment));
+  }
+
+  try {
+    let query = supabase.from("appointments").select("*").eq("tenant_id", req.user.tenantId).order("start_at", { ascending: true });
+    if (req.user.role === "staff") query = query.eq("staff_id", req.user.staffId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return res.json((data || []).map(mapAppointment));
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const rows = req.user.role === "staff" ? demoAppointmentRows.filter((item) => item.staff_id === req.user.staffId) : demoAppointmentRows;
+      return res.json(rows.map(mapAppointment));
+    }
+    throw error;
+  }
 }));
 
 app.post("/api/appointments", requireRole("admin"), asyncHandler(async (req, res) => {
-  const { data: service, error: serviceError } = await supabase.from("services").select("*").eq("id", req.body.serviceId).eq("tenant_id", req.user.tenantId).single();
-  if (serviceError) return res.status(404).json({ error: "Service not found" });
-  const startAt = req.body.startAt ? new Date(req.body.startAt) : new Date(`${req.body.date}T${req.body.time}:00`);
-  const endAt = new Date(startAt.getTime() + Number(service.duration_minutes) * 60_000);
-  const { data, error } = await supabase
-    .from("appointments")
-    .insert({
-      tenant_id: req.user.tenantId,
-      customer_name: req.body.customerName,
-      customer_email: req.body.customerEmail,
-      email: req.body.customerEmail,
-      staff_id: req.body.staffId,
-      service_id: req.body.serviceId,
-      start_at: startAt.toISOString(),
-      end_at: endAt.toISOString(),
-      status: req.body.status || "booked",
-      deposit_required_cents: service.deposit_cents || 0,
-      deposit_paid: Boolean(req.body.depositPaid),
-      notes: req.body.notes || "",
-    })
-    .select("*")
-    .single();
-  if (error) throw error;
-  await auditLog(req, "ADMIN_APPOINTMENT_CREATED", { appointmentId: data.id });
-  io.emit("appointments:update", [mapAppointment(data)]);
-  res.status(201).json(mapAppointment(data));
+  if (canUseDemoFallback(req) || !supabase) {
+    const appointment = createDemoAppointment(req);
+    io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+    return res.status(201).json(mapAppointment(appointment));
+  }
+
+  try {
+    const { data: service, error: serviceError } = await supabase.from("services").select("*").eq("id", req.body.serviceId).eq("tenant_id", req.user.tenantId).single();
+    if (serviceError) return res.status(404).json({ error: "Service not found" });
+    const startAt = req.body.startAt ? new Date(req.body.startAt) : new Date(`${req.body.date}T${req.body.time}:00`);
+    const endAt = new Date(startAt.getTime() + Number(service.duration_minutes) * 60_000);
+    const { data, error } = await supabase
+      .from("appointments")
+      .insert({
+        tenant_id: req.user.tenantId,
+        customer_name: req.body.customerName,
+        customer_email: req.body.customerEmail,
+        email: req.body.customerEmail,
+        staff_id: req.body.staffId,
+        service_id: req.body.serviceId,
+        start_at: startAt.toISOString(),
+        end_at: endAt.toISOString(),
+        status: req.body.status || "booked",
+        deposit_required_cents: service.deposit_cents || 0,
+        deposit_paid: Boolean(req.body.depositPaid),
+        notes: req.body.notes || "",
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    await auditLog(req, "ADMIN_APPOINTMENT_CREATED", { appointmentId: data.id });
+    io.emit("appointments:update", [mapAppointment(data)]);
+    return res.status(201).json(mapAppointment(data));
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const appointment = createDemoAppointment(req);
+      io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+      return res.status(201).json(mapAppointment(appointment));
+    }
+    throw error;
+  }
 }));
 
 app.patch("/api/appointments/:id/status", requireRole("admin", "staff"), requireStaffIsolation, asyncHandler(async (req, res) => {
   const allowed = ["arrived", "in_progress", "completed", "no_show"];
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid status" });
-  let query = supabase.from("appointments").update({ status: req.body.status, updated_at: new Date().toISOString() }).eq("tenant_id", req.user.tenantId).eq("id", req.params.id);
-  if (req.user.role === "staff") query = query.eq("staff_id", req.user.staffId);
-  const { data, error } = await query.select("*").single();
-  if (error) throw error;
-  io.emit("appointments:update", [mapAppointment(data)]);
-  res.json(mapAppointment(data));
+  if (canUseDemoFallback(req) || !supabase) {
+    const appointment = demoAppointmentRows.find((item) => item.id === req.params.id && (req.user.role !== "staff" || item.staff_id === req.user.staffId));
+    if (!appointment) return res.status(404).json({ error: "Appointment not found" });
+    appointment.status = req.body.status;
+    io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+    return res.json(mapAppointment(appointment));
+  }
+
+  try {
+    let query = supabase.from("appointments").update({ status: req.body.status, updated_at: new Date().toISOString() }).eq("tenant_id", req.user.tenantId).eq("id", req.params.id);
+    if (req.user.role === "staff") query = query.eq("staff_id", req.user.staffId);
+    const { data, error } = await query.select("*").single();
+    if (error) throw error;
+    io.emit("appointments:update", [mapAppointment(data)]);
+    return res.json(mapAppointment(data));
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const appointment = demoAppointmentRows.find((item) => item.id === req.params.id && (req.user.role !== "staff" || item.staff_id === req.user.staffId));
+      if (!appointment) return res.status(404).json({ error: "Appointment not found" });
+      appointment.status = req.body.status;
+      io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+      return res.json(mapAppointment(appointment));
+    }
+    throw error;
+  }
 }));
 
 app.post("/api/bookings", requireRole("admin", "client"), asyncHandler(async (req, res) => {
@@ -730,31 +1191,73 @@ app.post("/api/bookings", requireRole("admin", "client"), asyncHandler(async (re
     return res.status(403).json({ error: "Booking email must match the authenticated user" });
   }
   const startAt = req.body.startAt ? new Date(req.body.startAt) : new Date(`${req.body.date}T${req.body.time}:00`);
-  const { data, error } = await supabase.rpc("create_client_booking", {
-    p_tenant_id: req.user.tenantId,
-    p_client_id: req.user.id,
-    p_customer_name: req.body.customerName,
-    p_customer_email: requestedEmail,
-    p_staff_id: req.body.staffId,
-    p_service_id: req.body.serviceId,
-    p_start_at: startAt.toISOString(),
-    p_notes: req.body.notes || "",
-  });
-  if (error) throw error;
-  await auditLog(req, "CLIENT_BOOKING_CREATED", { appointmentId: data.id, staffId: req.body.staffId });
-  io.emit("appointments:update", [mapAppointment(data)]);
-  res.status(201).json({ appointment: mapAppointment(data), payment: { required: data.deposit_required_cents > 0, depositAmount: moneyNumber(data.deposit_required_cents) } });
+  if (canUseDemoFallback(req) || !supabase) {
+    const appointment = createDemoAppointment({ user: req.user, body: { ...req.body, startAt: startAt.toISOString(), customerEmail: requestedEmail } });
+    io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+    return res.status(201).json({
+      appointment: mapAppointment(appointment),
+      payment: { required: appointment.deposit_required_cents > 0, depositAmount: moneyNumber(appointment.deposit_required_cents) },
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("create_client_booking", {
+      p_tenant_id: req.user.tenantId,
+      p_client_id: req.user.id,
+      p_customer_name: req.body.customerName,
+      p_customer_email: requestedEmail,
+      p_staff_id: req.body.staffId,
+      p_service_id: req.body.serviceId,
+      p_start_at: startAt.toISOString(),
+      p_notes: req.body.notes || "",
+    });
+    if (error) throw error;
+    await auditLog(req, "CLIENT_BOOKING_CREATED", { appointmentId: data.id, staffId: req.body.staffId });
+    io.emit("appointments:update", [mapAppointment(data)]);
+    return res.status(201).json({ appointment: mapAppointment(data), payment: { required: data.deposit_required_cents > 0, depositAmount: moneyNumber(data.deposit_required_cents) } });
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const appointment = createDemoAppointment({ user: req.user, body: { ...req.body, startAt: startAt.toISOString(), customerEmail: requestedEmail } });
+      io.emit("appointments:update", demoAppointmentRows.map(mapAppointment));
+      return res.status(201).json({
+        appointment: mapAppointment(appointment),
+        payment: { required: appointment.deposit_required_cents > 0, depositAmount: moneyNumber(appointment.deposit_required_cents) },
+      });
+    }
+    throw error;
+  }
 }));
 
 app.get("/api/admin/metrics", requireRole("admin"), asyncHandler(async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
-  const [{ data: appointments }, { data: invoices }, { data: ledger }, { data: staff }, { data: inventory }] = await Promise.all([
-    supabase.from("appointments").select("id, client_id, customer_email, status, start_at").eq("tenant_id", req.user.tenantId),
-    supabase.from("invoices").select("id, total_cents, status, created_at").eq("tenant_id", req.user.tenantId).is("deleted_at", null),
-    supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId),
-    supabase.from("staff").select("base_salary_cents").eq("tenant_id", req.user.tenantId).is("deleted_at", null),
-    supabase.from("inventory").select("stock, reorderAt").eq("tenant_id", req.user.tenantId).then((result) => result).catch(() => ({ data: [] })),
-  ]);
+  let appointments = demoAppointmentRows;
+  let invoices = demoInvoiceRows;
+  let ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+  let staff = demoStaffRows;
+  let inventory = [];
+
+  if (!canUseDemoFallback(req) && supabase) {
+    try {
+      const results = await Promise.all([
+        supabase.from("appointments").select("id, client_id, customer_email, status, start_at").eq("tenant_id", req.user.tenantId),
+        supabase.from("invoices").select("id, total_cents, status, created_at").eq("tenant_id", req.user.tenantId).is("deleted_at", null),
+        supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId),
+        supabase.from("staff").select("base_salary_cents").eq("tenant_id", req.user.tenantId).is("deleted_at", null),
+        supabase.from("inventory").select("stock, reorderAt").eq("tenant_id", req.user.tenantId).then((result) => result).catch(() => ({ data: [] })),
+      ]);
+      appointments = results[0].data || [];
+      invoices = results[1].data || [];
+      ledger = results[2].data || [];
+      staff = results[3].data || [];
+      inventory = results[4].data || [];
+    } catch {
+      appointments = demoAppointmentRows;
+      invoices = demoInvoiceRows;
+      ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+      staff = demoStaffRows;
+      inventory = [];
+    }
+  }
 
   const activeClients = new Set((appointments || []).map((item) => item.client_id || item.customer_email).filter(Boolean)).size;
   const revenueCents = (ledger || []).filter((row) => row.entry_type === "revenue").reduce((sum, row) => sum + Number(row.amount_cents || 0), 0)
@@ -786,42 +1289,37 @@ app.get("/api/metrics", requireRole("admin"), (req, res, next) => {
 });
 
 app.get("/api/financials", requireRole("admin"), asyncHandler(async (req, res) => {
-  const { data: ledger, error } = await supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId);
-  if (error) throw error;
+  let ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+  if (!canUseDemoFallback(req) && supabase) {
+    try {
+      const { data, error } = await supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId);
+      if (error) throw error;
+      ledger = data || [];
+    } catch {
+      ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+    }
+  }
   const revenue = ledger.filter((row) => row.entry_type === "revenue").reduce((sum, row) => sum + Number(row.amount_cents || 0), 0);
   const expenses = ledger.filter((row) => row.entry_type !== "revenue").reduce((sum, row) => sum + Math.abs(Number(row.amount_cents || 0)), 0);
   res.json({ revenue: moneyNumber(revenue), expenses: moneyNumber(expenses), netProfit: moneyNumber(revenue - expenses) });
 }));
 
 app.get("/api/invoices", requireRole("admin"), asyncHandler(async (req, res) => {
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("*, invoice_line_items(*)")
-    .eq("tenant_id", req.user.tenantId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  res.json((data || []).map((invoice) => ({
-    id: invoice.invoice_number || invoice.id,
-    date: String(invoice.created_at).slice(0, 10),
-    customer: invoice.customer_name,
-    customerEmail: invoice.customer_email,
-    payment: invoice.payment_method,
-    status: invoice.status === "paid" ? "Paid" : invoice.status,
-    subtotal: moneyNumber(invoice.subtotal_cents),
-    discount: moneyNumber(invoice.discount_cents),
-    total: moneyNumber(invoice.total_cents),
-    createdAt: invoice.created_at,
-    items: (invoice.invoice_line_items || []).map((item) => ({
-      serviceId: item.service_id || "other",
-      staffId: item.staff_id,
-      name: item.description,
-      quantity: item.quantity,
-      unitPrice: moneyNumber(item.unit_amount_cents),
-      total: moneyNumber(item.amount_cents),
-      custom: !item.service_id,
-    })),
-  })));
+  if (canUseDemoFallback(req) || !supabase) return res.json(demoInvoiceRows.map(mapInvoice));
+
+  try {
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*, invoice_line_items(*)")
+      .eq("tenant_id", req.user.tenantId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return res.json((data || []).map(mapInvoice));
+  } catch (error) {
+    if (demoAuthEnabled) return res.json(demoInvoiceRows.map(mapInvoice));
+    throw error;
+  }
 }));
 
 app.post("/api/invoices", requireRole("admin"), asyncHandler(async (req, res) => {
@@ -829,76 +1327,62 @@ app.post("/api/invoices", requireRole("admin"), asyncHandler(async (req, res) =>
   if (!req.body.customer) return res.status(400).json({ error: "Customer name is required" });
   if (items.length === 0) return res.status(400).json({ error: "At least one invoice item is required" });
 
-  const normalizedItems = items.map((item) => {
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const unitAmountCents = toCents(item.unitPrice || 0);
-    return {
-      tenant_id: req.user.tenantId,
-      staff_id: item.staffId,
-      service_id: item.serviceId === "other" ? null : item.serviceId,
-      description: String(item.name || "Service"),
-      quantity,
-      unit_amount_cents: unitAmountCents,
-      amount_cents: quantity * unitAmountCents,
-    };
-  });
+  if (canUseDemoFallback(req) || !supabase) {
+    const invoice = createDemoInvoice(req);
+    const response = mapInvoice(invoice);
+    io.emit("invoices:update", demoInvoiceRows.map(mapInvoice));
+    return res.status(201).json(response);
+  }
+
+  const normalizedItems = normalizeInvoiceItems(req);
   const subtotalCents = normalizedItems.reduce((sum, item) => sum + item.amount_cents, 0);
   const discountCents = toCents(req.body.discount || 0);
   const totalCents = Math.max(0, subtotalCents - discountCents);
   const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
 
-  const { data: invoice, error: invoiceError } = await supabase
-    .from("invoices")
-    .insert({
+  try {
+    const { data: invoice, error: invoiceError } = await supabase
+      .from("invoices")
+      .insert({
+        tenant_id: req.user.tenantId,
+        customer_name: req.body.customer,
+        customer_email: req.body.customerEmail || "walk-in@flourish.local",
+        invoice_number: invoiceNumber,
+        status: String(req.body.status || "Paid").toLowerCase(),
+        subtotal_cents: subtotalCents,
+        discount_cents: discountCents,
+        total_cents: totalCents,
+        payment_method: req.body.payment || "Cash",
+        created_by: req.user.id,
+      })
+      .select("*")
+      .single();
+    if (invoiceError) throw invoiceError;
+
+    const { error: lineError } = await supabase.from("invoice_line_items").insert(normalizedItems.map((item) => ({ ...item, invoice_id: invoice.id })));
+    if (lineError) throw lineError;
+    await supabase.from("ledger_entries").insert({
       tenant_id: req.user.tenantId,
-      customer_name: req.body.customer,
-      customer_email: req.body.customerEmail || "walk-in@flourish.local",
-      invoice_number: invoiceNumber,
-      status: String(req.body.status || "Paid").toLowerCase(),
-      subtotal_cents: subtotalCents,
-      discount_cents: discountCents,
-      total_cents: totalCents,
-      payment_method: req.body.payment || "Cash",
+      invoice_id: invoice.id,
+      entry_type: "revenue",
+      amount_cents: totalCents,
+      description: `Invoice ${invoiceNumber}`,
       created_by: req.user.id,
-    })
-    .select("*")
-    .single();
-  if (invoiceError) throw invoiceError;
+    });
 
-  const { error: lineError } = await supabase.from("invoice_line_items").insert(normalizedItems.map((item) => ({ ...item, invoice_id: invoice.id })));
-  if (lineError) throw lineError;
-  await supabase.from("ledger_entries").insert({
-    tenant_id: req.user.tenantId,
-    invoice_id: invoice.id,
-    entry_type: "revenue",
-    amount_cents: totalCents,
-    description: `Invoice ${invoiceNumber}`,
-    created_by: req.user.id,
-  });
-
-  const response = {
-    id: invoiceNumber,
-    date: String(invoice.created_at).slice(0, 10),
-    customer: invoice.customer_name,
-    payment: invoice.payment_method,
-    status: "Paid",
-    items: normalizedItems.map((item) => ({
-      serviceId: item.service_id || "other",
-      staffId: item.staff_id,
-      name: item.description,
-      quantity: item.quantity,
-      unitPrice: moneyNumber(item.unit_amount_cents),
-      total: moneyNumber(item.amount_cents),
-      custom: !item.service_id,
-    })),
-    subtotal: moneyNumber(subtotalCents),
-    discount: moneyNumber(discountCents),
-    total: moneyNumber(totalCents),
-    createdAt: invoice.created_at,
-  };
-  await auditLog(req, "INVOICE_CREATED", { invoiceId: invoice.id, invoiceNumber });
-  io.emit("invoices:update", [response]);
-  res.status(201).json(response);
+    const response = mapInvoice({ ...invoice, invoice_line_items: normalizedItems });
+    await auditLog(req, "INVOICE_CREATED", { invoiceId: invoice.id, invoiceNumber });
+    io.emit("invoices:update", [response]);
+    return res.status(201).json(response);
+  } catch (error) {
+    if (demoAuthEnabled) {
+      const invoice = createDemoInvoice(req);
+      const response = mapInvoice(invoice);
+      io.emit("invoices:update", demoInvoiceRows.map(mapInvoice));
+      return res.status(201).json(response);
+    }
+    throw error;
+  }
 }));
 
 app.get("/api/payroll", requireRole("admin", "staff"), requireStaffIsolation, asyncHandler(async (req, res) => {
@@ -1100,7 +1584,12 @@ io.on("connection", (socket) => {
 
 server.on("error", (error) => {
   if (error?.code === "EADDRINUSE") {
-    console.error(`Port ${port} is already in use. The API is probably already running at http://localhost:${port}. Stop the existing process before starting another one.`);
+    console.error([
+      `Port ${port} is already in use. The API is probably already running at http://localhost:${port}.`,
+      "Use the existing API process, or stop it before starting another one.",
+      `Windows helper: Get-NetTCPConnection -LocalPort ${port} | Select-Object OwningProcess`,
+      `Then stop the process with: Stop-Process -Id <PID>`,
+    ].join("\n"));
     process.exit(1);
   }
   throw error;

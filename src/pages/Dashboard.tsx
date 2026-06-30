@@ -104,6 +104,7 @@ function monthLabel(key: string) {
 }
 
 function buildRevenueData(invoices: Invoice[]) {
+  const rows = Array.isArray(invoices) ? invoices : [];
   const start = new Date();
   start.setDate(1);
   start.setMonth(start.getMonth() - 5);
@@ -112,7 +113,7 @@ function buildRevenueData(invoices: Invoice[]) {
     const date = new Date(start);
     date.setMonth(start.getMonth() + index);
     const key = monthKey(date);
-    const revenue = invoices
+    const revenue = rows
       .filter((invoice) => String(invoice.date).startsWith(key) && invoice.status === "Paid")
       .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
 

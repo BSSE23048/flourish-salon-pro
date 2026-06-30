@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_URL, getAuthHeaders } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, getAuthHeaders } from "@/lib/api";
 import { toast } from "sonner";
 
 type Service = { id: string; name: string; price: number };
@@ -86,13 +86,21 @@ export default function Billing() {
       fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers }),
     ]);
     const [invoiceData, serviceData, staffData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json()]);
+    if (!invoiceRes.ok) throw new Error(invoiceData.error || "Could not load invoices");
+    if (!serviceRes.ok) throw new Error(serviceData.error || "Could not load services");
+    if (!staffRes.ok) throw new Error(staffData.error || "Could not load staff");
+    if (!Array.isArray(invoiceData) || !Array.isArray(serviceData) || !Array.isArray(staffData)) {
+      throw new Error("The API returned an unexpected billing payload");
+    }
     setInvoices(invoiceData);
     setServices(serviceData);
     setStaff(staffData);
   };
 
   useEffect(() => {
-    loadData().catch(() => toast.error("Could not load billing data"));
+    loadData().catch((error) => {
+      toast.error(error instanceof TypeError ? API_UNAVAILABLE_MESSAGE : error instanceof Error ? error.message : "Could not load billing data");
+    });
   }, []);
 
   const addItem = () => {
