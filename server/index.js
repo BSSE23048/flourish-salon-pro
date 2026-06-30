@@ -1290,18 +1290,34 @@ app.get("/api/metrics", requireRole("admin"), (req, res, next) => {
 
 app.get("/api/financials", requireRole("admin"), asyncHandler(async (req, res) => {
   let ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+  let invoices = demoInvoiceRows;
   if (!canUseDemoFallback(req) && supabase) {
     try {
-      const { data, error } = await supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId);
-      if (error) throw error;
-      ledger = data || [];
+      const [ledgerResult, invoiceResult] = await Promise.all([
+        supabase.from("ledger_entries").select("entry_type, amount_cents").eq("tenant_id", req.user.tenantId),
+        supabase.from("invoices").select("id, status").eq("tenant_id", req.user.tenantId).is("deleted_at", null),
+      ]);
+      if (ledgerResult.error) throw ledgerResult.error;
+      if (invoiceResult.error) throw invoiceResult.error;
+      ledger = ledgerResult.data || [];
+      invoices = invoiceResult.data || [];
     } catch {
       ledger = demoInvoiceRows.map((invoice) => ({ entry_type: "revenue", amount_cents: invoice.total_cents }));
+      invoices = demoInvoiceRows;
     }
   }
   const revenue = ledger.filter((row) => row.entry_type === "revenue").reduce((sum, row) => sum + Number(row.amount_cents || 0), 0);
   const expenses = ledger.filter((row) => row.entry_type !== "revenue").reduce((sum, row) => sum + Math.abs(Number(row.amount_cents || 0)), 0);
-  res.json({ revenue: moneyNumber(revenue), expenses: moneyNumber(expenses), netProfit: moneyNumber(revenue - expenses) });
+  const netProfit = revenue - expenses;
+  res.json({
+    revenue: moneyNumber(revenue),
+    expenses: moneyNumber(expenses),
+    netProfit: moneyNumber(netProfit),
+    netRevenue: moneyNumber(revenue),
+    payrollPayable: moneyNumber(expenses),
+    profitAfterPayroll: moneyNumber(netProfit),
+    invoiceCount: (invoices || []).filter((invoice) => !invoice.status || invoice.status === "paid" || invoice.status === "Paid").length,
+  });
 }));
 
 app.get("/api/invoices", requireRole("admin"), asyncHandler(async (req, res) => {

@@ -2,7 +2,8 @@ import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import { DollarSign, TrendingUp, Scissors, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
-import { API_URL } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL } from "@/lib/api";
+import { toast } from "sonner";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend,
@@ -46,6 +47,34 @@ const tooltipStyle = {
 
 const axisStyle = { fontSize: 11, fill: "hsl(25 15% 48%)", fontFamily: "Satoshi" };
 
+type Financials = {
+  netRevenue: number;
+  payrollPayable: number;
+  profitAfterPayroll: number;
+  invoiceCount: number;
+};
+
+const emptyFinancials: Financials = {
+  netRevenue: 0,
+  payrollPayable: 0,
+  profitAfterPayroll: 0,
+  invoiceCount: 0,
+};
+
+function asNumber(value: unknown) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function normalizeFinancials(value: unknown): Financials {
+  const data = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    netRevenue: asNumber(data.netRevenue ?? data.revenue),
+    payrollPayable: asNumber(data.payrollPayable ?? data.expenses),
+    profitAfterPayroll: asNumber(data.profitAfterPayroll ?? data.netProfit),
+    invoiceCount: asNumber(data.invoiceCount),
+  };
+}
+
 function ChartCard({ title, eyebrow, children }: { title: string; eyebrow: string; children: React.ReactNode }) {
   return (
     <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
@@ -57,15 +86,19 @@ function ChartCard({ title, eyebrow, children }: { title: string; eyebrow: strin
 }
 
 export default function Reports() {
-  const [financials, setFinancials] = useState({
-    netRevenue: 0, payrollPayable: 0, profitAfterPayroll: 0, invoiceCount: 0,
-  });
+  const [financials, setFinancials] = useState<Financials>(emptyFinancials);
 
   useEffect(() => {
     fetch(`${API_URL}/api/financials`, { headers: { "x-role": "admin" } })
-      .then((r) => r.json())
-      .then((d) => setFinancials(d))
-      .catch(() => undefined);
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load reports");
+        setFinancials(normalizeFinancials(data));
+      })
+      .catch((error) => {
+        setFinancials(emptyFinancials);
+        toast.error(error instanceof TypeError ? API_UNAVAILABLE_MESSAGE : error instanceof Error ? error.message : "Could not load reports");
+      });
   }, []);
 
   return (
