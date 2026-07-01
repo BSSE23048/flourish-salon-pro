@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localDateKey } from "@/lib/date";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +42,7 @@ export default function Appointments() {
   const [form, setForm] = useState({
     customerName: "", customerEmail: "",
     serviceId: "", staffId: "",
-    date: new Date().toISOString().slice(0, 10), time: "10:00",
+    date: localDateKey(), time: "10:00",
   });
 
   const serviceMap = useMemo(() => Object.fromEntries(services.map((s) => [s.id, s])), [services]);

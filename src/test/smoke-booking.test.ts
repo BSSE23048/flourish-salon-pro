@@ -6,7 +6,7 @@
  * 2. GET /api/appointments returns the newly created appointment
  * 3. GET /api/customers includes the auto-created customer
  * 4. POST /api/customers creates a customer directly
- * 5. POST /api/bookings for an existing customer increments visits (not duplicate)
+ * 5. POST /api/bookings for an existing customer increases bookings without counting a visit
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
@@ -19,7 +19,7 @@ type SmokeAppointment = {
 type SmokeCustomer = {
   name: string;
   visits: number;
-  segment: string;
+  totalBookings: number;
 };
 
 async function fetchJSON(url: string, options: RequestInit = {}) {
@@ -37,11 +37,30 @@ async function fetchJSON(url: string, options: RequestInit = {}) {
 
 describe("Smoke tests: Appointment booking & customer sync", () => {
   let serverReachable = false;
+  const runId = Date.now().toString(36);
+  const smokeName = `Smoke Test Customer ${runId}`;
+  const smokeEmail = `smoketest-${runId}@example.com`;
+  const day = String((Date.now() % 20) + 1).padStart(2, "0");
+  const month = String(((Date.now() % 8) + 1)).padStart(2, "0");
+  const firstDate = `2099-${month}-${day}`;
+  const secondDate = `2099-${month}-${String(Number(day) + 1).padStart(2, "0")}`;
+  const directName = `Directly Added Customer ${runId}`;
+  const directEmail = `direct-${runId}@example.com`;
 
   beforeAll(async () => {
     try {
       const res = await fetch(`${API_URL}/api/health`);
       serverReachable = res.ok;
+      if (serverReachable) {
+        await fetchJSON(`${API_URL}/api/staff/stf-sara/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "online" }),
+        });
+        await fetchJSON(`${API_URL}/api/staff/stf-nadia/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "online" }),
+        });
+      }
     } catch {
       serverReachable = false;
     }
@@ -79,11 +98,12 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const bookingRes = await fetchJSON(`${API_URL}/api/bookings`, {
       method: "POST",
       body: JSON.stringify({
-        customerName: "Smoke Test Customer",
-        customerEmail: "smoketest@example.com",
+        customerName: smokeName,
+        customerEmail: smokeEmail,
+        customerPhone: "0300-1111111",
         staffId: "stf-sara",
         serviceId: "svc-haircut",
-        date: "2026-12-25",
+        date: firstDate,
         time: "14:00",
         notes: "Smoke test booking",
       }),
@@ -92,13 +112,13 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     expect(bookingRes.ok).toBe(true);
     expect(bookingRes.status).toBe(201);
     expect(bookingRes.body.appointment).toBeDefined();
-    expect(bookingRes.body.appointment.customerName).toBe("Smoke Test Customer");
-    expect(bookingRes.body.appointment.status).toBe("booked");
+    expect(bookingRes.body.appointment.customerName).toBe(smokeName);
+    expect(bookingRes.body.appointment.status).toBe("confirmed");
 
     // Verify the appointment shows in GET /api/appointments
     const aptsRes = await fetchJSON(`${API_URL}/api/appointments`);
     const newApt = aptsRes.body.find(
-      (a: SmokeAppointment) => a.customerName === "Smoke Test Customer"
+      (a: SmokeAppointment) => a.customerName === smokeName
     );
     expect(newApt).toBeDefined();
 
@@ -106,14 +126,14 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const afterRes = await fetchJSON(`${API_URL}/api/customers`);
     expect(afterRes.body.length).toBe(customersBefore + 1);
     const newCustomer = afterRes.body.find(
-      (c: SmokeCustomer) => c.name === "Smoke Test Customer"
+      (c: SmokeCustomer) => c.name === smokeName
     );
     expect(newCustomer).toBeDefined();
-    expect(newCustomer.visits).toBe(1);
-    expect(newCustomer.segment).toBe("New");
+    expect(newCustomer.visits).toBe(0);
+    expect(newCustomer.totalBookings).toBe(1);
   });
 
-  it("POST /api/bookings for an existing customer increments visits (no duplicate)", async () => {
+  it("POST /api/bookings for an existing customer increases bookings without counting a visit", async () => {
     if (!serverReachable) return;
 
     const beforeRes = await fetchJSON(`${API_URL}/api/customers`);
@@ -123,11 +143,12 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const bookingRes = await fetchJSON(`${API_URL}/api/bookings`, {
       method: "POST",
       body: JSON.stringify({
-        customerName: "Smoke Test Customer",
-        customerEmail: "smoketest@example.com",
+        customerName: smokeName,
+        customerEmail: smokeEmail,
+        customerPhone: "0300-1111111",
         staffId: "stf-nadia",
         serviceId: "svc-facial",
-        date: "2026-12-26",
+        date: secondDate,
         time: "15:00",
         notes: "Second booking for same customer",
       }),
@@ -140,12 +161,13 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const afterRes = await fetchJSON(`${API_URL}/api/customers`);
     expect(afterRes.body.length).toBe(customersBefore);
 
-    // Visit count should have incremented
+    // Booking alone should not increment visits; only arrived/completed appointments do.
     const customer = afterRes.body.find(
-      (c: SmokeCustomer) => c.name === "Smoke Test Customer"
+      (c: SmokeCustomer) => c.name === smokeName
     );
     expect(customer).toBeDefined();
-    expect(customer.visits).toBe(2);
+    expect(customer.visits).toBe(0);
+    expect(customer.totalBookings).toBe(2);
   });
 
   it("POST /api/customers creates a customer directly", async () => {
@@ -157,16 +179,16 @@ describe("Smoke tests: Appointment booking & customer sync", () => {
     const createRes = await fetchJSON(`${API_URL}/api/customers`, {
       method: "POST",
       body: JSON.stringify({
-        name: "Directly Added Customer",
+        name: directName,
         phone: "0300-9999999",
-        email: "direct@example.com",
+        email: directEmail,
         notes: "Added via API",
       }),
     });
 
     expect(createRes.ok).toBe(true);
     expect(createRes.status).toBe(201);
-    expect(createRes.body.name).toBe("Directly Added Customer");
+    expect(createRes.body.name).toBe(directName);
 
     const afterRes = await fetchJSON(`${API_URL}/api/customers`);
     expect(afterRes.body.length).toBe(customersBefore + 1);

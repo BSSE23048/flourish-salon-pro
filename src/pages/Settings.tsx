@@ -52,7 +52,7 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("0300-1234567");
   const [address, setAddress] = useState("Shop 12, F-7 Markaz, Islamabad");
   const [whatsappEnabled, setWhatsappEnabled] = useState(true);
-  const [notifications, setNotifications] = useState({ appointments: true, stock: true, daily: false });
+  const [notifications, setNotifications] = useState({ appointments: true, payroll: true, daily: false });
 
   const handleSave = () => toast.success("Settings saved successfully!");
 
@@ -123,10 +123,10 @@ export default function SettingsPage() {
               onChange={(v) => { setNotifications({ ...notifications, appointments: v }); toast.success(v ? "Appointment alerts enabled" : "Disabled"); }}
             />
             <ToggleRow
-              title="Low stock alerts"
-              description="Alert when inventory is running low"
-              checked={notifications.stock}
-              onChange={(v) => { setNotifications({ ...notifications, stock: v }); toast.success(v ? "Stock alerts enabled" : "Disabled"); }}
+              title="Payroll and expense alerts"
+              description="Get notified when payroll or expense records need review"
+              checked={notifications.payroll}
+              onChange={(v) => { setNotifications({ ...notifications, payroll: v }); toast.success(v ? "Finance alerts enabled" : "Disabled"); }}
             />
             <ToggleRow
               title="Daily summary"

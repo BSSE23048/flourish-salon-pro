@@ -1,132 +1,236 @@
-import { useState } from "react";
-import { Plus, Search, Star } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { io, Socket } from "socket.io-client";
+import { Plus, RefreshCw, Search, Star, Users } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { toast } from "sonner";
 
-const initialCustomers = [
-  { id: 1, name: "Ayesha Khan",  phone: "0300-1234567", email: "ayesha@email.com",  visits: 12, lastVisit: "2026-02-26", totalSpent: "Rs. 42,500", notes: "Prefers Sara for haircuts", vip: true },
-  { id: 2, name: "Fatima Ali",   phone: "0321-7654321", email: "fatima@email.com",  visits: 8,  lastVisit: "2026-02-26", totalSpent: "Rs. 28,000", notes: "Allergic to certain products", vip: false },
-  { id: 3, name: "Zainab Raza",  phone: "0333-1112233", email: "zainab@email.com",  visits: 15, lastVisit: "2026-02-26", totalSpent: "Rs. 55,200", notes: "VIP customer", vip: true },
-  { id: 4, name: "Mehak Tariq",  phone: "0345-9998887", email: "mehak@email.com",   visits: 3,  lastVisit: "2026-02-25", totalSpent: "Rs. 9,500",  notes: "", vip: false },
-  { id: 5, name: "Sana Malik",   phone: "0312-5556667", email: "sana@email.com",    visits: 20, lastVisit: "2026-02-25", totalSpent: "Rs. 78,000", notes: "Bridal packages regular", vip: true },
-  { id: 6, name: "Rabia Noor",   phone: "0300-4445556", email: "rabia@email.com",   visits: 6,  lastVisit: "2026-02-24", totalSpent: "Rs. 18,300", notes: "", vip: false },
-];
+type Customer = {
+  id: string | number;
+  name: string;
+  phone?: string;
+  email?: string;
+  totalBookings: number;
+  visits: number;
+  lastVisitedDate?: string;
+  notes?: string;
+  vip: boolean;
+  createdAt?: string;
+  source?: string;
+};
 
 function CustomerAvatar({ name }: { name: string }) {
   const initials = name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
   return (
     <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-      <span className="text-xs font-semibold text-primary">{initials}</span>
+      <span className="text-xs font-semibold text-primary">{initials || "CU"}</span>
+    </div>
+  );
+}
+
+function formatDate(value?: string, fallback = "No visits yet") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
+function CustomerSkeleton() {
+  return (
+    <div className="space-y-3 p-5">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div key={index} className="grid grid-cols-[minmax(180px,1fr)_120px_90px_120px] gap-4 rounded-xl border border-border/60 p-4">
+          <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
+          <div className="h-4 animate-pulse rounded bg-muted" />
+          <div className="h-4 animate-pulse rounded bg-muted" />
+          <div className="h-4 animate-pulse rounded bg-muted" />
+        </div>
+      ))}
     </div>
   );
 }
 
 export default function Customers() {
-  const [customers, setCustomers] = useState(initialCustomers);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const filtered = customers.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
-  );
+  const loadCustomers = useCallback(async () => {
+    setLoading(true);
+    try {
+      setLoadError(null);
+      const res = await fetch(`${API_URL}/api/customers`, { headers: { "x-role": "admin" } });
+      const data = await res.json();
+      if (!res.ok) {
+        setCustomers(Array.isArray(data.fallback) ? data.fallback : []);
+        throw new Error(data.error || "Could not load customers");
+      }
+      setCustomers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : API_UNAVAILABLE_MESSAGE;
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  useEffect(() => {
+    const socket: Socket = io(API_URL, SOCKET_OPTIONS);
+    socket.on("customers:update", () => loadCustomers());
+    return () => { socket.disconnect(); };
+  }, [loadCustomers]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-customers")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => loadCustomers())
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_roles" }, () => loadCustomers())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadCustomers]);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return customers;
+    return customers.filter((customer) =>
+      customer.name.toLowerCase().includes(query) ||
+      String(customer.email || "").toLowerCase().includes(query) ||
+      String(customer.phone || "").includes(query)
+    );
+  }, [customers, search]);
+
+  const addCustomer = async (data: Record<string, string>) => {
+    try {
+      const res = await fetch(`${API_URL}/api/customers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        body: JSON.stringify(data),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Could not add customer");
+      toast.success(`${body.name || data.name} added to customers.`);
+      await loadCustomers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not add customer");
+    }
+  };
 
   return (
     <div>
       <PageHeader
         title="Customers"
-        subtitle="Your client database — history, preferences, and spending at a glance."
+        subtitle="Live customer profiles with booking totals, real visit counts, and last visit dates."
         eyebrow="Operations"
-        actions={<Button onClick={() => setShowAdd(true)}><Plus />Add Customer</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={loadCustomers} disabled={loading}>
+              <RefreshCw className={loading ? "animate-spin" : ""} />
+              Refresh
+            </Button>
+            <Button onClick={() => setShowAdd(true)}><Plus />Add Customer</Button>
+          </div>
+        }
       />
 
       <FormDialog
         open={showAdd}
         onOpenChange={setShowAdd}
         title="Add Customer"
-        description="Add a new client to your database."
+        description="Add a walk-in or manually managed customer record."
         fields={[
           { key: "name",  label: "Full Name",  required: true, placeholder: "e.g. Ayesha Khan" },
-          { key: "phone", label: "Phone",      type: "tel",    required: true, placeholder: "0300-1234567" },
+          { key: "phone", label: "Phone",      type: "tel",    placeholder: "0300-1234567" },
           { key: "email", label: "Email",      type: "email",  placeholder: "client@email.com" },
-          { key: "notes", label: "Notes",      type: "textarea", placeholder: "Preferences, allergies, notes…" },
+          { key: "notes", label: "Notes",      type: "textarea", placeholder: "Preferences, allergies, notes..." },
         ]}
-        onSubmit={(data) => {
-          setCustomers([{
-            id: customers.length + 1, name: data.name, phone: data.phone,
-            email: data.email, notes: data.notes || "",
-            visits: 0, lastVisit: new Date().toISOString().split("T")[0],
-            totalSpent: "Rs. 0", vip: false,
-          }, ...customers]);
-          toast.success(`${data.name} added to customers.`);
-        }}
+        onSubmit={addCustomer}
         submitLabel="Add Customer"
       />
 
       <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
-        {/* Search toolbar */}
-        <div className="p-4 sm:p-5 border-b border-border flex items-center gap-3">
+        <div className="p-4 sm:p-5 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground stroke-[1.5]" />
             <Input
-              placeholder="Search by name or phone…"
+              placeholder="Search by name, email, or phone..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-11"
             />
           </div>
           <div className="text-xs text-muted-foreground flex-shrink-0">
-            {filtered.length} clients
+            {filtered.length} registered customers
           </div>
+          {loadError && (
+            <Badge variant="warning" className="ml-auto">Using fallback data</Badge>
+          )}
         </div>
 
-        <DataTable
-          columns={[
-            {
-              key: "name", label: "Customer",
-              render: (row) => (
-                <div className="flex items-center gap-3">
-                  <CustomerAvatar name={row.name as string} />
-                  <div>
-                    <p className="font-medium text-foreground leading-none">{row.name as string}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{row.email as string}</p>
+        {loading ? (
+          <CustomerSkeleton />
+        ) : (
+          <DataTable
+            columns={[
+              {
+                key: "name", label: "Customer",
+                render: (row) => (
+                  <div className="flex items-center gap-3">
+                    <CustomerAvatar name={row.name as string} />
+                    <div>
+                      <p className="font-medium text-foreground leading-none">{row.name as string}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{(row.email as string) || "No email"}</p>
+                    </div>
                   </div>
-                </div>
-              ),
-            },
-            { key: "phone", label: "Phone", render: (row) => <span className="text-muted-foreground font-mono text-xs">{row.phone as string}</span> },
-            {
-              key: "visits", label: "Visits",
-              render: (row) => (
-                <div className="flex items-center gap-2">
-                  <span className="font-editorial text-xl text-primary leading-none">{row.visits as number}</span>
-                  {(row.vip as boolean) && (
-                    <Badge variant="warning">
-                      <Star className="w-2.5 h-2.5" />
-                      VIP
-                    </Badge>
-                  )}
-                </div>
-              ),
-            },
-            { key: "lastVisit",  label: "Last Visit",   render: (row) => <span className="text-muted-foreground">{row.lastVisit as string}</span> },
-            { key: "totalSpent", label: "Total Spent",   render: (row) => <span className="font-medium">{row.totalSpent as string}</span> },
-            {
-              key: "notes", label: "Notes",
-              render: (row) => (
-                <span className="text-muted-foreground text-xs max-w-[180px] truncate block">
-                  {(row.notes as string) || "—"}
-                </span>
-              ),
-            },
-          ]}
-          data={filtered}
-          emptyMessage="No customers found"
-        />
+                ),
+              },
+              { key: "phone", label: "Phone", render: (row) => <span className="text-muted-foreground font-mono text-xs">{(row.phone as string) || "Not added"}</span> },
+              {
+                key: "totalBookings", label: "Bookings / Visits",
+                render: (row) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-foreground">Bookings: {row.totalBookings as number}</span>
+                    <span className="text-muted-foreground">|</span>
+                    <span className="font-medium text-primary">Visits: {row.visits as number}</span>
+                    {(row.vip as boolean) && (
+                      <Badge variant="warning">
+                        <Star className="w-2.5 h-2.5" />
+                        VIP
+                      </Badge>
+                    )}
+                  </div>
+                ),
+              },
+              { key: "createdAt", label: "Registered", render: (row) => <span className="text-muted-foreground">{formatDate(row.createdAt as string, "Not recorded")}</span> },
+              { key: "lastVisitedDate", label: "Last Visited", render: (row) => <span className="text-muted-foreground">{formatDate(row.lastVisitedDate as string)}</span> },
+              {
+                key: "notes", label: "Notes",
+                render: (row) => (
+                  <span className="text-muted-foreground text-xs max-w-[180px] truncate block">
+                    {(row.notes as string) || "-"}
+                  </span>
+                ),
+              },
+            ]}
+            data={filtered as unknown as Record<string, unknown>[]}
+            emptyIcon={<Users />}
+            emptyMessage={search ? "No customers match your search" : "No customers registered yet"}
+          />
+        )}
       </div>
     </div>
   );

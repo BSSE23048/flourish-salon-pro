@@ -2,11 +2,23 @@ import cors from "cors";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 4000;
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const businessTimeZone = process.env.BUSINESS_TIMEZONE || "Asia/Karachi";
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabaseAdmin = supabaseUrl && supabaseKey && supabaseUrl !== "https://example.supabase.co" && supabaseKey !== "demo-key"
+  ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
 
 const io = new Server(server, {
   cors: { origin: clientOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
@@ -23,20 +35,29 @@ const CANCEL_CUTOFF_MINUTES = 240;
 const HOLD_MINUTES = 7;
 
 const now = () => new Date();
-const today = () => now().toISOString().slice(0, 10);
+function dateKey(value = now()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: businessTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(value));
+}
+const today = () => dateKey(now());
+const appointmentDateKey = (appointment) => dateKey(appointment.startAt);
 const minutes = (value) => value * 60 * 1000;
 
 const services = [
-  { id: "svc-haircut", name: "Signature Haircut", category: "Hair", durationMinutes: 30, price: 3500, deposit: 1000, description: "Precision cut, consultation, and finishing polish.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-facial", name: "Botanical Facial", category: "Skin", durationMinutes: 60, price: 6500, deposit: 1500, description: "A calming skin reset with massage and glow mask.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-color", name: "Lived-In Color", category: "Color", durationMinutes: 120, price: 14500, deposit: 3500, description: "Dimensional color with toner and finish.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, deposit: 5000, description: "Luxury bridal consultation and makeup trial.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-haircut", name: "Signature Haircut", category: "Hair", durationMinutes: 30, price: 3500, description: "Precision cut, consultation, and finishing polish.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-facial", name: "Botanical Facial", category: "Skin", durationMinutes: 60, price: 6500, description: "A calming skin reset with massage and glow mask.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-color", name: "Lived-In Color", category: "Color", durationMinutes: 120, price: 14500, description: "Dimensional color with toner and finish.", imageUrl: "/Hero_sec.png", active: true },
+  { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, description: "Luxury bridal consultation and makeup trial.", imageUrl: "/Hero_sec.png", active: true },
 ];
 
 const staff = [
-  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, baseSalary: 65000, status: "online", bio: "Editorial cuts, soft color, and quiet luxury finishes." },
-  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, baseSalary: 52000, status: "online", bio: "Glow-focused facials and camera-ready makeup." },
-  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, baseSalary: 45000, status: "online", bio: "Detail-led treatments with calm, precise timing." },
+  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, baseSalary: 65000, status: "online", credentialEmail: "sara.ahmed@flourish.local", activePassword: "staff123", passwordUpdatedAt: new Date().toISOString(), bio: "Editorial cuts, soft color, and quiet luxury finishes." },
+  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, baseSalary: 52000, status: "online", credentialEmail: "nadia.hussain@flourish.local", activePassword: "Nadia123", passwordUpdatedAt: new Date().toISOString(), bio: "Glow-focused facials and camera-ready makeup." },
+  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, baseSalary: 45000, status: "online", credentialEmail: "hina.rashid@flourish.local", activePassword: "Hina1234", passwordUpdatedAt: new Date().toISOString(), bio: "Detail-led treatments with calm, precise timing." },
 ];
 
 const state = {
@@ -57,7 +78,6 @@ const state = {
       serviceId: "svc-haircut",
       startAt: atBusinessTime(today(), 10, 0).toISOString(),
       status: "booked",
-      depositPaid: true,
     }),
     makeAppointment({
       id: "apt-1002",
@@ -67,19 +87,14 @@ const state = {
       serviceId: "svc-facial",
       startAt: atBusinessTime(today(), 23, 30).toISOString(),
       status: "in_progress",
-      depositPaid: true,
     }),
   ],
   holds: [],
   waitlist: [],
   attendance: [],
   customers: [
-    { id: 1, name: "Ayesha Khan", phone: "0300-1234567", visits: 12, lifetimeValue: 42500, segment: "VIP" },
-    { id: 2, name: "Fatima Ali", phone: "0321-7654321", visits: 8, lifetimeValue: 28000, segment: "Regular" },
-  ],
-  inventory: [
-    { id: 1, item: "Hair Serum", stock: 3, reorderAt: 8, vendor: "Luxe Beauty Supply" },
-    { id: 2, item: "Keratin Kit", stock: 14, reorderAt: 6, vendor: "SalonPro" },
+    { id: 1, name: "Ayesha Khan", phone: "0300-1234567", email: "ayesha@email.com", notes: "Prefers Sara for haircuts", createdAt: new Date().toISOString() },
+    { id: 2, name: "Fatima Ali", phone: "0321-7654321", email: "fatima@email.com", notes: "Allergic to certain products", createdAt: new Date().toISOString() },
   ],
   invoices: [
     {
@@ -100,11 +115,22 @@ const state = {
   leaveRequests: [],
   payroll: [],
   payrollAdjustments: [],
+  expenses: [
+    {
+      id: "exp-1001",
+      date: today(),
+      category: "Product purchase",
+      vendor: "Luxe Beauty Supply",
+      description: "Hair serum stock refill",
+      amount: 12000,
+      createdAt: new Date().toISOString(),
+    },
+  ],
 };
 
 const plans = [
   { id: "starter", name: "Starter", priceMonthly: 29, seats: 3, locations: 1, features: ["Bookings", "Customers", "Invoices"] },
-  { id: "scale", name: "Scale", priceMonthly: 79, seats: 15, locations: 3, features: ["Everything in Starter", "Inventory", "Reports", "Automations"] },
+  { id: "scale", name: "Scale", priceMonthly: 79, seats: 15, locations: 3, features: ["Everything in Starter", "Payroll", "Reports", "Automations"] },
   { id: "enterprise", name: "Enterprise", priceMonthly: 199, seats: 50, locations: 10, features: ["Everything in Scale", "SAML", "Audit logs", "Priority support"] },
 ];
 
@@ -134,6 +160,33 @@ function verifyPin(req, res) {
   return true;
 }
 
+function sanitizeCredentialPart(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function staffEmailFromName(name, domain = "flourish.local") {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  const firstName = sanitizeCredentialPart(parts[0] || "staff");
+  const lastName = sanitizeCredentialPart(parts.slice(1).join("") || "member");
+  return `${firstName}.${lastName}@${domain}`;
+}
+
+function uniqueStaffEmail(baseEmail, ignoreStaffId = "") {
+  const [localPart, domain] = baseEmail.split("@");
+  let email = baseEmail;
+  let count = 2;
+  while (staff.some((member) => member.id !== ignoreStaffId && member.credentialEmail === email)) {
+    email = `${localPart}${count}@${domain}`;
+    count += 1;
+  }
+  return email;
+}
+
+function generateTemporaryPassword(length = 8) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+}
+
 function getService(serviceId) {
   return services.find((service) => service.id === serviceId);
 }
@@ -141,15 +194,12 @@ function getService(serviceId) {
 function normalizeServicePayload(input, existing = {}) {
   const price = Number(input.price ?? existing.price ?? 0);
   const durationMinutes = Number(input.durationMinutes ?? input.duration ?? existing.durationMinutes ?? 30);
-  const deposit = Number(input.deposit ?? existing.deposit ?? 0);
-
   return {
     ...existing,
     name: String(input.name ?? existing.name ?? "").trim(),
     category: String(input.category ?? existing.category ?? "Hair").trim(),
     durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 30,
     price: Number.isFinite(price) && price >= 0 ? price : 0,
-    deposit: Number.isFinite(deposit) && deposit >= 0 ? deposit : 0,
     description: String(input.description ?? existing.description ?? "").trim(),
     imageUrl: String(input.imageUrl ?? existing.imageUrl ?? "/Hero_sec.png").trim() || "/Hero_sec.png",
     active: input.active ?? existing.active ?? true,
@@ -187,15 +237,18 @@ function staffAttendancePercentage(staffId, month = monthKey()) {
   const presentDays = state.attendance.filter((entry) =>
     entry.staffId === staffId &&
     entry.date.startsWith(month) &&
-    ["present", "half_day", "clocked_in", "clocked_out"].includes(entry.status)
+    ["present", "half_day", "paid_leave", "clocked_in", "clocked_out"].includes(entry.status)
   ).reduce((sum, entry) => sum + (entry.status === "half_day" ? 0.5 : 1), 0);
   return totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
 }
 
 function normalizeStaffPayload(input, existing = {}) {
+  const name = String(input.name ?? existing.name ?? "").trim();
+  const domain = String(input.domain || "flourish.local").replace(/^@/, "").trim() || "flourish.local";
+  const credentialEmail = String(input.credentialEmail || existing.credentialEmail || staffEmailFromName(name, domain)).trim().toLowerCase();
   return {
     ...existing,
-    name: String(input.name ?? existing.name ?? "").trim(),
+    name,
     title: String(input.title ?? existing.title ?? "").trim(),
     specialties: Array.isArray(input.specialties)
       ? input.specialties.map(String).filter(Boolean)
@@ -203,6 +256,9 @@ function normalizeStaffPayload(input, existing = {}) {
     commissionRate: Math.max(0, Number(input.commissionRate ?? existing.commissionRate ?? 0) || 0),
     baseSalary: Math.max(0, Number(input.baseSalary ?? existing.baseSalary ?? 0) || 0),
     status: input.status || existing.status || "online",
+    credentialEmail,
+    activePassword: existing.activePassword,
+    passwordUpdatedAt: existing.passwordUpdatedAt,
     bio: String(input.bio ?? existing.bio ?? "").trim(),
   };
 }
@@ -278,6 +334,8 @@ function financialSummary(month = monthKey()) {
   const payroll = payrollRows(month);
   const payrollPayable = payroll.reduce((sum, row) => sum + row.payable, 0);
   const payrollPaid = payroll.filter((row) => row.paid).reduce((sum, row) => sum + row.payable, 0);
+  const expenses = state.expenses.filter((expense) => String(expense.date).startsWith(month));
+  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
   return {
     month,
     grossRevenue,
@@ -286,8 +344,23 @@ function financialSummary(month = monthKey()) {
     payrollPayable,
     payrollPaid,
     payrollUnpaid: payrollPayable - payrollPaid,
+    expenseTotal,
+    operatingExpenses: expenseTotal,
     profitAfterPayroll: netRevenue - payrollPayable,
+    netProfit: netRevenue - payrollPayable - expenseTotal,
     invoiceCount: invoices.length,
+    expenseCount: expenses.length,
+    expenses,
+  };
+}
+
+function normalizeExpensePayload(input) {
+  return {
+    date: input.date || today(),
+    category: String(input.category || "Miscellaneous").trim(),
+    vendor: String(input.vendor || "").trim(),
+    description: String(input.description || "").trim(),
+    amount: Math.max(0, Number(input.amount || 0)),
   };
 }
 
@@ -343,16 +416,155 @@ function makeAppointment(input) {
     id: input.id || `apt-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     customerName: input.customerName,
     customerEmail: input.customerEmail,
+    customerPhone: input.customerPhone || "",
     staffId: input.staffId,
     serviceId: input.serviceId,
     startAt: startAt.toISOString(),
     endAt: endAt.toISOString(),
     status: input.status || "booked",
-    depositRequired: service?.deposit || 0,
-    depositPaid: Boolean(input.depositPaid),
     notes: input.notes || "",
     createdAt: new Date().toISOString(),
   };
+}
+
+function upsertCustomer({ name, email = "", phone = "", notes = "" }) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedName = String(name || "").trim();
+  const customer = state.customers.find((item) =>
+    (normalizedEmail && String(item.email || "").toLowerCase() === normalizedEmail) ||
+    String(item.name || "").toLowerCase() === normalizedName.toLowerCase()
+  );
+
+  if (customer) {
+    customer.email = customer.email || normalizedEmail;
+    customer.phone = customer.phone || phone;
+    customer.notes = notes || customer.notes;
+    return { customer, created: false };
+  }
+
+  const nextCustomer = {
+    id: Math.max(0, ...state.customers.map((item) => Number(item.id) || 0)) + 1,
+    name: normalizedName,
+    phone: String(phone || "").trim(),
+    email: normalizedEmail,
+    notes: String(notes || "").trim(),
+    createdAt: new Date().toISOString(),
+  };
+  state.customers.unshift(nextCustomer);
+  return { customer: nextCustomer, created: true };
+}
+
+function customerStatsFor({ name = "", email = "" }) {
+  const normalizedEmail = String(email || "").toLowerCase();
+  const normalizedName = String(name || "").toLowerCase();
+  const matchingAppointments = state.appointments.filter((appointment) =>
+    (normalizedEmail && String(appointment.customerEmail || "").toLowerCase() === normalizedEmail) ||
+    String(appointment.customerName || "").toLowerCase() === normalizedName
+  );
+  const visitStatuses = new Set(["arrived", "completed"]);
+  const visitAppointments = matchingAppointments.filter((appointment) => visitStatuses.has(String(appointment.status || "").toLowerCase()));
+  const lastVisitedDate = visitAppointments
+    .map((appointment) => appointmentDateKey(appointment))
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+
+  return {
+    totalBookings: matchingAppointments.length,
+    visits: visitAppointments.length,
+    lastVisitedDate,
+  };
+}
+
+function appointmentStatsFromRows(rows = []) {
+  const stats = new Map();
+  const visitStatuses = new Set(["arrived", "completed"]);
+  const ensure = (key) => {
+    if (!stats.has(key)) stats.set(key, { totalBookings: 0, visits: 0, lastVisitedDate: "" });
+    return stats.get(key);
+  };
+
+  for (const row of rows) {
+    const email = String(row.customer_email || row.customerEmail || "").trim().toLowerCase();
+    const name = String(row.customer_name || row.customerName || "").trim().toLowerCase();
+    const keys = [email && `email:${email}`, name && `name:${name}`].filter(Boolean);
+    const status = String(row.status || "").toLowerCase();
+    const startValue = row.start_at || row.startAt || row.date || row.created_at || row.createdAt;
+    const visitDate = startValue ? dateKey(startValue) : "";
+
+    for (const key of keys) {
+      const entry = ensure(key);
+      entry.totalBookings += 1;
+      if (visitStatuses.has(status)) {
+        entry.visits += 1;
+        if (visitDate && (!entry.lastVisitedDate || visitDate > entry.lastVisitedDate)) {
+          entry.lastVisitedDate = visitDate;
+        }
+      }
+    }
+  }
+
+  return stats;
+}
+
+function statsForRecordFromMap(record, statsMap) {
+  const email = String(record.email || "").trim().toLowerCase();
+  const name = String(record.full_name || record.name || record.email || "").trim().toLowerCase();
+  return statsMap.get(`email:${email}`) || statsMap.get(`name:${name}`) || customerStatsFor({ name, email });
+}
+
+function normalizeCustomerRecord(record) {
+  const name = String(record.full_name || record.name || record.email || "Unnamed Customer").trim();
+  const email = String(record.email || "").trim();
+  const stats = customerStatsFor({ name, email });
+  return {
+    id: record.user_id || record.id,
+    name,
+    phone: record.phone || "",
+    email,
+    totalBookings: Number(record.totalBookings ?? record.total_bookings ?? stats.totalBookings ?? 0),
+    visits: Number(record.visits ?? record.visits_count ?? stats.visits ?? 0),
+    lastVisitedDate: record.lastVisitedDate || record.last_visited_date || stats.lastVisitedDate || "",
+    notes: record.notes || "",
+    vip: Number(record.visits ?? record.visits_count ?? stats.visits ?? 0) >= 10,
+    createdAt: record.created_at || record.createdAt || "",
+    source: record.source || "supabase",
+  };
+}
+
+function localCustomerRows() {
+  return state.customers.map((customer) => normalizeCustomerRecord({
+    ...customer,
+    full_name: customer.name,
+    source: "local",
+  }));
+}
+
+async function fetchSupabaseCustomerRows() {
+  if (!supabaseAdmin) return null;
+
+  const [{ data: profiles, error: profileError }, { data: roles, error: roleError }, appointmentResult] = await Promise.all([
+    supabaseAdmin.from("profiles").select("id,user_id,full_name,email,created_at,updated_at").order("created_at", { ascending: false }),
+    supabaseAdmin.from("user_roles").select("user_id,role"),
+    supabaseAdmin.from("appointments").select("customer_email,customer_name,status,start_at,date,created_at"),
+  ]);
+
+  if (profileError) throw profileError;
+  if (roleError) throw roleError;
+  const appointmentStats = appointmentStatsFromRows(appointmentResult.error ? [] : appointmentResult.data || []);
+
+  const roleMap = new Map();
+  for (const role of roles || []) {
+    if (!roleMap.has(role.user_id)) roleMap.set(role.user_id, new Set());
+    roleMap.get(role.user_id).add(role.role);
+  }
+
+  return (profiles || [])
+    .filter((profile) => {
+      const userRoles = roleMap.get(profile.user_id) || new Set();
+      return userRoles.has("customer") || (!userRoles.has("owner") && !userRoles.has("staff"));
+    })
+    .map((profile) => normalizeCustomerRecord({ ...profile, ...statsForRecordFromMap(profile, appointmentStats) }));
 }
 
 function cleanupHolds() {
@@ -494,15 +706,23 @@ app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
 app.get("/api/staff", (req, res) => {
   const includeUnavailable = req.query.includeUnavailable === "true" || ["admin", "staff"].includes(roleFromRequest(req));
   const month = req.query.month || monthKey();
+  const role = roleFromRequest(req);
   const commissionMap = Object.fromEntries(invoiceCommissions(month).map((item) => [item.staffId, item]));
   const payrollMap = Object.fromEntries(payrollRows(month).map((item) => [item.staffId, item]));
-  const rows = staff.map((member) => ({
-    ...member,
+  const rows = staff.map((member) => {
+    const row = {
+      ...member,
+      credentialEmail: member.credentialEmail,
+      activePassword: role === "admin" ? member.activePassword : undefined,
+      passwordUpdatedAt: member.passwordUpdatedAt,
     monthlyRevenue: commissionMap[member.id]?.revenue || 0,
     monthlyCommission: commissionMap[member.id]?.commission || 0,
     attendancePercentage: commissionMap[member.id]?.attendancePercentage || 0,
     monthlyPayable: payrollMap[member.id]?.payable || 0,
-  }));
+    };
+    if (role !== "admin") delete row.activePassword;
+    return row;
+  });
   res.json(includeUnavailable ? rows : rows.filter((member) => member.status === "online"));
 });
 
@@ -510,10 +730,17 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
   if (!verifyPin(req, res)) return;
   const payload = normalizeStaffPayload(req.body);
   if (!payload.name) return res.status(400).json({ error: "Staff name is required" });
-  const member = { id: `stf-${Date.now()}-${Math.random().toString(16).slice(2)}`, ...payload };
+  const temporaryPassword = generateTemporaryPassword();
+  const member = {
+    id: `stf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ...payload,
+    credentialEmail: uniqueStaffEmail(payload.credentialEmail),
+    activePassword: temporaryPassword,
+    passwordUpdatedAt: new Date().toISOString(),
+  };
   staff.push(member);
   io.emit("staff:update", member);
-  res.status(201).json(member);
+  res.status(201).json({ ...member, credentials: { email: member.credentialEmail, password: temporaryPassword } });
 });
 
 app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
@@ -522,9 +749,41 @@ app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
   if (index === -1) return res.status(404).json({ error: "Staff member not found" });
   const member = normalizeStaffPayload(req.body, staff[index]);
   if (!member.name) return res.status(400).json({ error: "Staff name is required" });
+  member.credentialEmail = uniqueStaffEmail(member.credentialEmail, member.id);
+  if (req.body.overridePassword) {
+    const nextPassword = String(req.body.overridePassword).trim();
+    if (nextPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    member.activePassword = nextPassword;
+    member.passwordUpdatedAt = new Date().toISOString();
+  }
   staff[index] = member;
   io.emit("staff:update", member);
   res.json(member);
+});
+
+app.patch("/api/staff/me/password", requireRole("staff", "admin"), (req, res) => {
+  const staffMember = getStaffMember(staffFromRequest(req));
+  if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
+  const currentPassword = String(req.body.currentPassword || "");
+  const nextPassword = String(req.body.newPassword || "");
+  if (staffMember.activePassword !== currentPassword) return res.status(401).json({ error: "Current password is incorrect" });
+  if (nextPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+  staffMember.activePassword = nextPassword;
+  staffMember.passwordUpdatedAt = new Date().toISOString();
+  io.emit("staff:update", staffMember);
+  res.json({ staffId: staffMember.id, email: staffMember.credentialEmail, passwordUpdatedAt: staffMember.passwordUpdatedAt });
+});
+
+app.patch("/api/staff/:id/password", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res)) return;
+  const member = getStaffMember(req.params.id);
+  if (!member) return res.status(404).json({ error: "Staff member not found" });
+  const nextPassword = String(req.body.password || generateTemporaryPassword()).trim();
+  if (nextPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+  member.activePassword = nextPassword;
+  member.passwordUpdatedAt = new Date().toISOString();
+  io.emit("staff:update", member);
+  res.json({ staffId: member.id, email: member.credentialEmail, password: member.activePassword, passwordUpdatedAt: member.passwordUpdatedAt });
 });
 
 app.delete("/api/staff/:id", requireRole("admin"), (req, res) => {
@@ -591,10 +850,13 @@ app.post("/api/holds", (req, res) => {
 });
 
 app.post("/api/bookings", (req, res) => {
-  const { holdId, customerName, customerEmail, staffId, serviceId, date, time, notes } = req.body;
+  const { holdId, customerName, customerEmail, customerPhone, staffId, serviceId, date, time, notes } = req.body;
   const service = getService(serviceId);
   if (!service) return res.status(404).json({ error: "Service not found" });
   if (!isStaffBookable(staffId)) return res.status(409).json({ error: "This staff member is offline today." });
+  if (!String(customerPhone || "").replace(/\D/g, "").match(/^\d{7,15}$/)) {
+    return res.status(400).json({ error: "A valid phone number is required" });
+  }
 
   const hold = holdId ? state.holds.find((item) => item.id === holdId && item.status === "active") : null;
   const start = hold ? new Date(hold.startAt) : parseBusinessStart(date, time);
@@ -607,26 +869,24 @@ app.post("/api/bookings", (req, res) => {
   const appointment = makeAppointment({
     customerName,
     customerEmail,
+    customerPhone,
     staffId,
     serviceId,
     startAt: start.toISOString(),
-    status: "booked",
-    depositPaid: false,
+    status: "confirmed",
     notes,
   });
   state.appointments.unshift(appointment);
+  upsertCustomer({
+    name: customerName,
+    email: customerEmail,
+    phone: customerPhone,
+  });
   if (hold) hold.status = "converted";
   emitSchedule(staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
-  res.status(201).json({
-    appointment,
-    payment: {
-      required: appointment.depositRequired > 0,
-      depositAmount: appointment.depositRequired,
-      checkoutUrl: `https://payments.example.com/deposit/${appointment.id}`,
-      message: "Stripe deposit stub: connect Stripe Checkout here before production.",
-    },
-  });
+  io.emit("customers:update", state.customers);
+  res.status(201).json({ appointment, message: "Booking confirmed. Payment is collected after service." });
 });
 
 app.post("/api/waitlist", (req, res) => {
@@ -669,7 +929,6 @@ app.post("/api/appointments", requireRole("admin"), (req, res) => {
     serviceId: service.id,
     startAt: start.toISOString(),
     status: req.body.status || "booked",
-    depositPaid: Boolean(req.body.depositPaid),
     notes: req.body.notes,
   });
   state.appointments.unshift(appointment);
@@ -716,7 +975,7 @@ app.get("/api/staff/me/schedule", requireRole("staff", "admin"), (req, res) => {
   const staffId = staffFromRequest(req);
   const date = req.query.date || today();
   const appointments = state.appointments.filter((appointment) =>
-    appointment.staffId === staffId && appointment.startAt.slice(0, 10) === date
+    appointment.staffId === staffId && appointmentDateKey(appointment) === date
   );
   const serviceMap = Object.fromEntries(services.map((service) => [service.id, service]));
   const staffMember = staff.find((item) => item.id === staffId);
@@ -742,6 +1001,22 @@ app.patch("/api/staff/:id/status", requireRole("admin"), (req, res) => {
   staffMember.status = req.body.status;
   io.emit("staff:update", staffMember);
   res.json(staffMember);
+});
+
+app.post("/api/auth/staff-login", (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const password = String(req.body.password || "");
+  const staffMember = staff.find((member) => member.credentialEmail === email && member.activePassword === password);
+  if (!staffMember) return res.status(401).json({ error: "Invalid staff email or password" });
+  res.json({
+    role: "staff",
+    staff: {
+      id: staffMember.id,
+      name: staffMember.name,
+      title: staffMember.title,
+      email: staffMember.credentialEmail,
+    },
+  });
 });
 
 app.post("/api/staff/me/leave", requireRole("staff", "admin"), (req, res) => {
@@ -855,24 +1130,43 @@ app.patch("/api/admin/leave-requests/:id", requireRole("admin"), (req, res) => {
 });
 
 app.get("/api/metrics", requireRole("admin"), (_req, res) => {
-  const serviceMap = Object.fromEntries(services.map((service) => [service.id, service]));
-  const revenueToday = state.appointments
-    .filter((appointment) => appointment.startAt.slice(0, 10) === today() && appointment.status === "completed")
-    .reduce((sum, appointment) => sum + (serviceMap[appointment.serviceId]?.price || 0), 0);
-  const lowStock = state.inventory.filter((item) => item.stock <= item.reorderAt);
+  const revenueToday = state.invoices
+    .filter((invoice) => invoice.date === today() && invoice.status === "Paid")
+    .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
   res.json({
-    appointmentsToday: state.appointments.filter((appointment) => appointment.startAt.slice(0, 10) === today()).length,
+    appointmentsToday: state.appointments.filter((appointment) => appointmentDateKey(appointment) === today()).length,
     revenueToday,
     totalCustomers: state.customers.length,
-    lowStockCount: lowStock.length,
     conversionRate: 68,
     retentionRate: 74,
-    lowStock,
   });
 });
 
-app.get("/api/customers", requireRole("admin"), (_req, res) => res.json(state.customers));
-app.get("/api/inventory", requireRole("admin"), (_req, res) => res.json(state.inventory));
+app.get("/api/customers", requireRole("admin"), async (_req, res) => {
+  try {
+    const supabaseRows = await fetchSupabaseCustomerRows();
+    if (supabaseRows) return res.json(supabaseRows);
+    return res.json(localCustomerRows());
+  } catch (error) {
+    console.error("Could not fetch Supabase customers", error);
+    return res.status(502).json({
+      error: "Could not fetch customers from Supabase",
+      fallback: localCustomerRows(),
+    });
+  }
+});
+app.post("/api/customers", requireRole("admin"), (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Customer name is required" });
+  const { customer, created } = upsertCustomer({
+    name,
+    email: req.body.email,
+    phone: req.body.phone,
+    notes: req.body.notes,
+  });
+  io.emit("customers:update", state.customers);
+  res.status(created ? 201 : 200).json(normalizeCustomerRecord({ ...customer, full_name: customer.name, source: "local" }));
+});
 app.get("/api/staff/commission", requireRole("admin", "staff"), (req, res) => {
   const month = req.query.month || monthKey();
   const rows = invoiceCommissions(month);
@@ -929,6 +1223,32 @@ app.delete("/api/payroll/adjustments/:id", requireRole("admin"), (req, res) => {
 app.get("/api/financials", requireRole("admin"), (req, res) => {
   res.json(financialSummary(req.query.month || monthKey()));
 });
+app.get("/api/expenses", requireRole("admin"), (req, res) => {
+  const month = req.query.month || monthKey();
+  res.json(state.expenses.filter((expense) => String(expense.date).startsWith(month)));
+});
+app.post("/api/expenses", requireRole("admin"), (req, res) => {
+  const payload = normalizeExpensePayload(req.body);
+  if (!payload.category) return res.status(400).json({ error: "Expense category is required" });
+  if (payload.amount <= 0) return res.status(400).json({ error: "Expense amount must be greater than zero" });
+  const expense = {
+    id: `exp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ...payload,
+    createdAt: new Date().toISOString(),
+  };
+  state.expenses.unshift(expense);
+  io.emit("expenses:update", state.expenses);
+  io.emit("financials:update", financialSummary(monthKey(expense.date)));
+  res.status(201).json(expense);
+});
+app.delete("/api/expenses/:id", requireRole("admin"), (req, res) => {
+  const index = state.expenses.findIndex((expense) => expense.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Expense not found" });
+  const [removed] = state.expenses.splice(index, 1);
+  io.emit("expenses:update", state.expenses);
+  io.emit("financials:update", financialSummary(monthKey(removed.date)));
+  res.json(removed);
+});
 app.get("/api/invoices", requireRole("admin"), (_req, res) => res.json(state.invoices));
 app.post("/api/invoices", requireRole("admin"), (req, res) => {
   const payload = normalizeInvoicePayload(req.body);
@@ -940,12 +1260,19 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   const invoice = {
     id: `INV-${Date.now().toString().slice(-6)}`,
     date: req.body.date || today(),
+    source: "walk-in",
+    customerEmail: req.body.customerEmail || "",
+    customerPhone: req.body.customerPhone || "",
     ...payload,
     createdAt: new Date().toISOString(),
   };
   state.invoices.unshift(invoice);
+  upsertCustomer({ name: invoice.customer, email: invoice.customerEmail, phone: invoice.customerPhone });
   io.emit("invoices:update", state.invoices);
+  io.emit("customers:update", localCustomerRows());
   io.emit("staff:commission:update", invoiceCommissions(monthKey(invoice.date)));
+  io.emit("payroll:update", payrollRows(monthKey(invoice.date)));
+  io.emit("financials:update", financialSummary(monthKey(invoice.date)));
   res.status(201).json(invoice);
 });
 app.get("/api/plans", requireRole("admin"), (_req, res) => res.json(plans));

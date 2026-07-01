@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 type LoginType = "admin" | "staff" | "client";
 
@@ -56,6 +57,14 @@ export default function Login() {
     }
   };
 
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+    });
+    if (error) toast.error(error.message);
+  };
+
   return (
     <div className="min-h-screen flex">
       {/* ── Left panel: Brand ── */}
@@ -85,7 +94,7 @@ export default function Login() {
             Elevate every<br />client experience.
           </h1>
           <p className="text-base text-white/55 leading-relaxed">
-            The complete platform for modern salons — bookings, team, inventory, and analytics in one elegant workspace.
+            The complete platform for modern salons — bookings, team, payroll, finance, and analytics in one elegant workspace.
           </p>
 
           {/* Stats */}
@@ -215,6 +224,17 @@ export default function Login() {
               {!loading && <ArrowRight className="w-4 h-4" />}
             </Button>
           </form>
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <Button type="button" variant="outline" className="h-12 w-full rounded-xl" onClick={signInWithGoogle}>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-bold text-primary">G</span>
+            Sign in with Google
+          </Button>
 
           {/* Demo credentials */}
           <div className="mt-6 rounded-xl border border-border bg-muted/60 p-4">

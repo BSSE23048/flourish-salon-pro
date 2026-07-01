@@ -7,7 +7,6 @@ import {
   Users,
   UserCog,
   Scissors,
-  Package,
   Receipt,
   Wallet,
   BarChart3,
@@ -44,7 +43,6 @@ const navGroups = [
     label: "Business",
     items: [
       { title: "Services", icon: Scissors, path: "/admin/services" },
-      { title: "Inventory", icon: Package, path: "/admin/inventory" },
       { title: "Billing", icon: Receipt, path: "/admin/billing" },
       { title: "Reports", icon: BarChart3, path: "/admin/reports" },
     ],

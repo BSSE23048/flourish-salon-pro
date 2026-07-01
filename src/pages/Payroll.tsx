@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localMonthKey } from "@/lib/date";
 import { toast } from "sonner";
 
 type Adjustment = { id: string; type: "deduction" | "bonus"; amount: number; reason: string };
@@ -35,6 +36,8 @@ type Summary = {
   payrollPaid: number;
   payrollUnpaid: number;
   profitAfterPayroll: number;
+  expenseTotal: number;
+  netProfit: number;
   invoiceCount: number;
 };
 
@@ -46,6 +49,8 @@ const emptySummary: Summary = {
   payrollPaid: 0,
   payrollUnpaid: 0,
   profitAfterPayroll: 0,
+  expenseTotal: 0,
+  netProfit: 0,
   invoiceCount: 0,
 };
 
@@ -54,7 +59,7 @@ function money(value: number) {
 }
 
 export default function Payroll() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(localMonthKey());
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(false);
@@ -93,8 +98,8 @@ export default function Payroll() {
   const totals = useMemo(() => [
     { label: "Net Revenue", value: money(summary.netRevenue), sub: `${summary.invoiceCount} paid invoices` },
     { label: "Payroll Payable", value: money(summary.payrollPayable), sub: "salary + commission - deductions" },
-    { label: "Payroll Paid", value: money(summary.payrollPaid), sub: `${money(summary.payrollUnpaid)} unpaid` },
-    { label: "Profit After Payroll", value: money(summary.profitAfterPayroll), sub: "net revenue minus payroll" },
+    { label: "Expenses", value: money(summary.expenseTotal), sub: "operating costs this month" },
+    { label: "Final Profit", value: money(summary.netProfit), sub: "revenue minus payroll and expenses" },
   ], [summary]);
 
   const markPaid = async (row: PayrollRow, paid: boolean) => {

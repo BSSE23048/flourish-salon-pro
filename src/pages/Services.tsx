@@ -18,7 +18,6 @@ type Service = {
   category: string;
   price: number;
   durationMinutes: number;
-  deposit: number;
   description: string;
   imageUrl: string;
 };
@@ -49,7 +48,6 @@ export default function Services() {
     category: data.category,
     price: Number(data.price),
     durationMinutes: Number(data.durationMinutes),
-    deposit: Number(data.deposit || 0),
     description: data.description,
     imageUrl: data.imageUrl || existing?.imageUrl || "/Hero_sec.png",
   });
@@ -59,7 +57,6 @@ export default function Services() {
     { key: "category", label: "Category", type: "select" as const, options: categories, required: true },
     { key: "price", label: "Price (Rs.)", type: "number" as const, required: true, placeholder: "e.g. 1500" },
     { key: "durationMinutes", label: "Duration (minutes)", type: "number" as const, required: true, placeholder: "e.g. 45" },
-    { key: "deposit", label: "Deposit (Rs.)", type: "number" as const, placeholder: "e.g. 1000" },
     { key: "imageUrl", label: "Upload Picture", type: "file" as const, accept: "image/*" },
     { key: "description", label: "Description", type: "textarea" as const, placeholder: "Describe what clients get" },
   ];
@@ -193,9 +190,6 @@ export default function Services() {
               <span className="text-lg font-bold text-primary">Rs. {Number(service.price).toLocaleString()}</span>
               <span className="text-xs text-muted-foreground">{service.durationMinutes} min</span>
             </div>
-            {service.deposit > 0 && (
-              <p className="mt-2 text-xs text-muted-foreground">Deposit: Rs. {Number(service.deposit).toLocaleString()}</p>
-            )}
             </div>
           </div>
         ))}

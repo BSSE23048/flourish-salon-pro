@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localDateKey, localMonthKey } from "@/lib/date";
 import { toast } from "sonner";
 
 type Service = {
@@ -49,7 +50,6 @@ type Metrics = {
   appointmentsToday: number;
   revenueToday: number;
   totalCustomers: number;
-  lowStockCount: number;
 };
 
 type PayrollResponse = {
@@ -63,7 +63,6 @@ const emptyMetrics: Metrics = {
   appointmentsToday: 0,
   revenueToday: 0,
   totalCustomers: 0,
-  lowStockCount: 0,
 };
 
 const statusMap: Record<string, AppointmentStatus> = {
@@ -76,7 +75,7 @@ const statusMap: Record<string, AppointmentStatus> = {
 };
 
 function todayInputValue() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateKey();
 }
 
 function currentMonthValue() {
@@ -92,7 +91,7 @@ function displayTime(value: string) {
 }
 
 function monthKey(date: Date) {
-  return date.toISOString().slice(0, 7);
+  return localMonthKey(date);
 }
 
 function monthLabel(key: string) {
@@ -197,7 +196,7 @@ export default function Dashboard() {
   }, []);
 
   const appointmentRows = useMemo(() => appointments
-    .filter((appointment) => appointment.startAt.slice(0, 10) === todayInputValue())
+    .filter((appointment) => localDateKey(new Date(appointment.startAt)) === todayInputValue())
     .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
     .map((appointment) => ({
       ...appointment,
@@ -294,8 +293,8 @@ export default function Dashboard() {
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Today's Appointments" value={metrics.appointmentsToday} icon={<Calendar className="h-5 w-5" />} subtitle={`${appointmentRows.length} shown in schedule`} />
-        <StatCard title="Today's Revenue" value={money(metrics.revenueToday)} icon={<DollarSign className="h-5 w-5" />} subtitle="Completed appointments" />
-        <StatCard title="Total Customers" value={metrics.totalCustomers} icon={<Users className="h-5 w-5" />} subtitle={`${metrics.lowStockCount} inventory alerts`} />
+        <StatCard title="Today's Revenue" value={money(metrics.revenueToday)} icon={<DollarSign className="h-5 w-5" />} subtitle="Paid invoice revenue" />
+        <StatCard title="Total Customers" value={metrics.totalCustomers} icon={<Users className="h-5 w-5" />} subtitle="Active customer records" />
         <StatCard title="Monthly Revenue" value={money(monthlyRevenue)} icon={<TrendingUp className="h-5 w-5" />} subtitle={`${invoiceCount} paid invoices`} />
       </div>
 
