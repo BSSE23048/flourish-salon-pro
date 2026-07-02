@@ -6,6 +6,8 @@ import CustomerPortal from "@/pages/CustomerPortal";
 const mocks = vi.hoisted(() => ({
   session: null as null | { user: { email: string; user_metadata?: Record<string, string> } },
   signInWithOAuth: vi.fn(),
+  signInWithPassword: vi.fn(),
+  signUp: vi.fn(),
   signOut: vi.fn(),
   toast: {
     error: vi.fn(),
@@ -57,6 +59,8 @@ vi.mock("@/integrations/supabase/client", () => ({
       getSession: vi.fn(async () => ({ data: { session: mocks.session } })),
       onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
       signInWithOAuth: mocks.signInWithOAuth,
+      signInWithPassword: mocks.signInWithPassword,
+      signUp: mocks.signUp,
       signOut: mocks.signOut,
     },
   },
@@ -98,7 +102,6 @@ const services = [
     category: "Hair",
     durationMinutes: 30,
     price: 3500,
-    deposit: 1000,
     description: "Precision cut",
   },
   {
@@ -107,7 +110,6 @@ const services = [
     category: "Beard",
     durationMinutes: 20,
     price: 1800,
-    deposit: 0,
     description: "Beard shaping",
   },
 ];
@@ -140,6 +142,8 @@ describe("CustomerPortal smoke and regression", () => {
     vi.clearAllMocks();
     mocks.session = null;
     mocks.signInWithOAuth.mockResolvedValue({ error: null });
+    mocks.signInWithPassword.mockResolvedValue({ data: { session: { user: { email: "client@example.com", user_metadata: {} } } }, error: null });
+    mocks.signUp.mockResolvedValue({ data: { session: { user: { email: "client@example.com", user_metadata: {} } } }, error: null });
     mocks.signOut.mockResolvedValue({ error: null });
     Element.prototype.scrollIntoView = vi.fn();
     window.localStorage.clear();
@@ -167,8 +171,9 @@ describe("CustomerPortal smoke and regression", () => {
     await screen.findByText("Signature Haircut");
     fireEvent.click(screen.getAllByRole("button", { name: /book appointment/i })[0]);
 
-    expect(await screen.findByRole("heading", { name: /client login/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /login with google/i }));
+    expect(await screen.findByRole("heading", { name: /sign in to book/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /apple/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /sign in with google/i }));
 
     await waitFor(() => {
       expect(mocks.signInWithOAuth).toHaveBeenCalledWith({

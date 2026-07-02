@@ -1,41 +1,26 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { ArrowRight, Eye, EyeOff, KeyRound, ShieldCheck, Sparkles, User, Users } from "lucide-react";
+import { Sparkles, Eye, EyeOff, ShieldCheck, User, Users, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 type LoginType = "admin" | "staff" | "client";
 
-const portalCopy: Record<LoginType, { title: string; subtitle: string; email: string; password: string }> = {
-  admin: {
-    title: "Owner / Admin",
-    subtitle: "Manage operations, finance, staff, and tenant security.",
-    email: "admin@flourish.local",
-    password: "password123",
-  },
-  staff: {
-    title: "Salon Staff",
-    subtitle: "Open your schedule, attendance, payroll, and security settings.",
-    email: "staff@flourish.local",
-    password: "staff123",
-  },
-  client: {
-    title: "Client Portal",
-    subtitle: "Book services, manage appointments, and access your salon profile.",
-    email: "",
-    password: "",
-  },
-};
+const loginRoles: { key: LoginType; label: string; icon: React.ElementType; description: string }[] = [
+  { key: "admin", label: "Admin", icon: ShieldCheck, description: "Full management access" },
+  { key: "staff", label: "Staff", icon: Users, description: "Team member portal" },
+  { key: "client", label: "Client", icon: User, description: "Book appointments" },
+];
 
 export default function Login() {
-  const [portal, setPortal] = useState<LoginType>("admin");
   const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState(portalCopy.admin.email);
-  const [password, setPassword] = useState(portalCopy.admin.password);
+  const [loginType, setLoginType] = useState<LoginType>("admin");
+  const [email, setEmail] = useState("admin@flourish.local");
+  const [password, setPassword] = useState("password123");
   const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -43,195 +28,239 @@ export default function Login() {
   const router = useRouter();
 
   useEffect(() => {
-    const requested = router.query.portal;
-    if (requested === "staff" || requested === "admin" || requested === "client") {
-      switchPortal(requested);
-    }
+    if (router.query.portal === "staff") setLoginType("staff");
+    if (router.query.portal === "admin") setLoginType("admin");
   }, [router.query.portal]);
 
-  const switchPortal = (next: LoginType) => {
-    setPortal(next);
-    setIsSignUp(false);
-    setEmail(portalCopy[next].email);
-    setPassword(portalCopy[next].password);
-    setFullName("");
+  const handleRoleSwitch = (key: LoginType) => {
+    setLoginType(key);
+    setIsSignUp(key === "client" ? isSignUp : false);
+    if (key === "admin") { setEmail("admin@flourish.local"); setPassword("password123"); }
+    else if (key === "staff") { setEmail("staff@flourish.local"); setPassword("staff123"); }
+    else { setEmail(""); setPassword(""); }
   };
 
-  const redirectForRole = (role?: string) => {
-    if (role === "staff") return router.push("/staff");
-    if (role === "customer" || role === "client") return router.push("/");
-    return router.push("/admin");
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
-    try {
-      if (portal === "client" && isSignUp) {
-        const { error } = await signUp(email, password, fullName);
-        if (error) throw new Error(error);
-        toast.success("Client account created. Check your email if verification is enabled.");
-        setIsSignUp(false);
-        return;
-      }
 
-      const { error, role } = await signIn(email, password);
-      if (error) throw new Error(error);
-      await redirectForRole(role);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Authentication failed");
-    } finally {
+    if (isSignUp) {
+      const { error } = await signUp(email, password, fullName);
       setLoading(false);
+      if (error) toast.error(error);
+      else toast.success("Account created! Please check your email to verify.");
+    } else {
+      const { error, role } = await signIn(email, password);
+      setLoading(false);
+      if (error) toast.error(error);
+      else router.push(role === "staff" ? "/staff" : role === "customer" ? "/" : "/admin");
     }
   };
 
-  const loginWithGoogle = async () => {
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: typeof window !== "undefined" ? `${window.location.origin}/` : undefined,
-        },
-      });
-      if (error) throw error;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Google sign-in failed");
-    }
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+    });
+    if (error) toast.error(error.message);
   };
 
   return (
-    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1fr]">
-      <aside className="hidden min-h-screen flex-col justify-between bg-[#07140f] p-12 text-white lg:flex">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#526048]">
-            <Sparkles className="h-5 w-5" />
+    <div className="min-h-screen flex">
+      {/* ── Left panel: Brand ── */}
+      <div className="hidden lg:flex lg:w-[52%] relative overflow-hidden bg-[#05150e] flex-col justify-between p-14">
+        {/* Subtle texture overlay */}
+        <div className="absolute inset-0 opacity-[0.03]"
+          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "32px 32px" }}
+        />
+
+        {/* Logo */}
+        <div className="relative flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#485341] border border-[#485341] flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-white/90" />
           </div>
           <div>
-            <p className="text-xl font-bold leading-none">Flourish</p>
-            <p className="mt-1 text-[10px] uppercase tracking-[0.24em] text-white/45">Salon Pro</p>
+            <span className="font-sans font-bold text-[22px] text-white tracking-tight leading-none">Flourish</span>
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-white/40 leading-none mt-0.5">Salon Pro</span>
           </div>
         </div>
 
-        <div className="max-w-md">
-          <p className="mb-4 text-xs font-medium uppercase tracking-[0.22em] text-[#92a184]">Secure Workspace</p>
-          <h1 className="font-editorial text-6xl leading-[1.05]">One salon platform, three protected portals.</h1>
-          <p className="mt-6 text-sm leading-7 text-white/58">
-            Role-aware access keeps owners, staff, and clients inside the exact workflows they are allowed to use.
+        {/* Hero text */}
+        <div className="relative space-y-6 max-w-md">
+          <p className="text-[11px] uppercase tracking-[0.25em] text-[#485341] font-medium">
+            Premium Salon Management
           </p>
+          <h1 className="font-editorial text-6xl text-white leading-[1.08] tracking-tight">
+            Elevate every<br />client experience.
+          </h1>
+          <p className="text-base text-white/55 leading-relaxed">
+            The complete platform for modern salons — bookings, team, payroll, finance, and analytics in one elegant workspace.
+          </p>
+
+          {/* Stats */}
+          <div className="flex gap-8 pt-4">
+            {[
+              { value: "2,500+", label: "Happy clients" },
+              { value: "15+", label: "Expert stylists" },
+              { value: "4.9", label: "Average rating" },
+            ].map((stat) => (
+              <div key={stat.label}>
+                <p className="font-editorial text-3xl text-white leading-none">{stat.value}</p>
+                <p className="text-xs text-white/40 mt-1 leading-none">{stat.label}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <p className="text-xs text-white/28">2026 Flourish Salon Pro</p>
-      </aside>
+        {/* Bottom tagline */}
+        <p className="relative text-xs text-white/25 tracking-wide">
+          © 2026 Flourish Salon Pro. Crafted with care.
+        </p>
+      </div>
 
-      <main className="flex min-h-screen items-center justify-center px-5 py-10">
-        <div className="w-full max-w-[460px]">
-          <div className="mb-8 lg:hidden">
-            <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Sparkles className="h-4 w-4" />
+      {/* ── Right panel: Form ── */}
+      <div className="flex-1 flex items-center justify-center p-6 lg:p-16 bg-background">
+        <div className="w-full max-w-[380px] animate-fade-up">
+
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center gap-2.5 mb-10">
+            <div className="w-8 h-8 rounded-lg bg-[#485341] flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-sans font-bold tracking-tight text-xl text-foreground">Flourish</span>
+          </div>
+
+          {/* Heading */}
+          <div className="mb-8">
+            <h2 className="font-editorial text-3xl text-foreground tracking-tight mb-2">
+              {isSignUp ? "Create account" : "Welcome back"}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {isSignUp
+                ? "Create your client account to start booking."
+                : "Sign in to your workspace."}
+            </p>
+          </div>
+
+          {/* Role switcher */}
+          <div className="flex gap-1.5 bg-muted rounded-full p-1 mb-6">
+            {loginRoles.map((role) => (
+              <button
+                key={role.key}
+                type="button"
+                onClick={() => handleRoleSwitch(role.key)}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 rounded-full py-2 text-xs font-medium transition-all duration-200",
+                  loginType === role.key
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <role.icon className="w-3.5 h-3.5" />
+                {role.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isSignUp && loginType === "client" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground block">Full Name</label>
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your full name"
+                  required
+                  autoFocus
+                />
               </div>
-              <p className="text-xl font-bold">Flourish Salon Pro</p>
+            )}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground block">Email address</label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={
+                  loginType === "admin"
+                    ? "admin@flourish.local"
+                    : loginType === "staff"
+                    ? "staff@flourish.local"
+                    : "you@example.com"
+                }
+                required
+                autoFocus={!isSignUp}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground block">Password</label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                  className="pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-fast"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <Button type="submit" className="w-full mt-2" size="lg" disabled={loading}>
+              {loading
+                ? isSignUp ? "Creating account…" : "Signing in…"
+                : isSignUp
+                ? "Create account"
+                : `Continue as ${loginType === "client" ? "Client" : loginType === "admin" ? "Admin" : "Staff"}`}
+              {!loading && <ArrowRight className="w-4 h-4" />}
+            </Button>
+          </form>
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <Button type="button" variant="outline" className="h-12 w-full rounded-xl" onClick={signInWithGoogle}>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-bold text-primary">G</span>
+            Sign in with Google
+          </Button>
+
+          {/* Demo credentials */}
+          <div className="mt-6 rounded-xl border border-border bg-muted/60 p-4">
+            <p className="text-xs font-medium text-foreground mb-1.5">Demo credentials</p>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p>Admin: <span className="text-foreground font-mono">admin@flourish.local</span> / <span className="text-foreground font-mono">password123</span></p>
+              <p>Staff: <span className="text-foreground font-mono">staff@flourish.local</span> / <span className="text-foreground font-mono">staff123</span></p>
             </div>
           </div>
 
-          <div className="mb-6">
-            <p className="text-sm font-medium text-primary">Secure login</p>
-            <h2 className="mt-2 font-editorial text-4xl text-foreground">{portalCopy[portal].title}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">{portalCopy[portal].subtitle}</p>
-          </div>
-
-          <Tabs value={portal} onValueChange={(value) => switchPortal(value as LoginType)}>
-            <TabsList className="grid h-auto w-full grid-cols-3 rounded-lg">
-              <TabsTrigger value="admin" className="gap-1.5 py-2">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Owner
-              </TabsTrigger>
-              <TabsTrigger value="staff" className="gap-1.5 py-2">
-                <Users className="h-3.5 w-3.5" />
-                Staff
-              </TabsTrigger>
-              <TabsTrigger value="client" className="gap-1.5 py-2">
-                <User className="h-3.5 w-3.5" />
-                Client
-              </TabsTrigger>
-            </TabsList>
-
-            {(["admin", "staff", "client"] as LoginType[]).map((key) => (
-              <TabsContent key={key} value={key} className="mt-6">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {key === "client" && isSignUp && (
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-foreground">Full name</label>
-                      <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" required />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-foreground">Email address</label>
-                    <Input
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder={key === "client" ? "you@example.com" : portalCopy[key].email}
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-foreground">Password</label>
-                    <div className="relative">
-                      <Input
-                        type={showPassword ? "text" : "password"}
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="Enter password"
-                        required
-                        minLength={key === "client" && isSignUp ? 10 : 6}
-                        className="pr-11"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((current) => !current)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                    {loading ? "Checking credentials..." : key === "client" && isSignUp ? "Create client account" : "Login"}
-                    {!loading && <ArrowRight className="h-4 w-4" />}
-                  </Button>
-                </form>
-
-                {key === "client" && (
-                  <div className="mt-4 space-y-3">
-                    <Button type="button" variant="outline" className="w-full" onClick={loginWithGoogle}>
-                      <KeyRound className="h-4 w-4" />
-                      Login with Google
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => setIsSignUp((current) => !current)}
-                      className="w-full text-center text-sm text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {isSignUp ? "Already registered? Login instead" : "New client? Create an account"}
-                    </button>
-                  </div>
-                )}
-              </TabsContent>
-            ))}
-          </Tabs>
-
-          <div className="mt-6 rounded-lg border border-border bg-muted/60 p-4 text-xs text-muted-foreground">
-            <p className="mb-1 font-medium text-foreground">Demo credentials</p>
-            <p>Owner/admin: <span className="font-mono text-foreground">admin@flourish.local</span> / <span className="font-mono text-foreground">password123</span></p>
-            <p>Staff: <span className="font-mono text-foreground">staff@flourish.local</span> / <span className="font-mono text-foreground">staff123</span></p>
+          {/* Sign up toggle */}
+          <div className="mt-5 text-center">
+            <button
+              disabled={loginType !== "client"}
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-sm text-muted-foreground hover:text-primary transition-fast disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loginType !== "client"
+                ? "Client sign-up available only"
+                : isSignUp
+                ? "Already have an account? Sign in"
+                : "Need a client account? Sign up"}
+            </button>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }

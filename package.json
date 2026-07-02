@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "dev:api": "node server/index.js",
     "dev:full": "concurrently \"npm run dev\" \"npm run dev:api\"",
     "build": "next build",

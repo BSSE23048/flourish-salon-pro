@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { API_URL } from "@/lib/api";
+import { syncSupabaseCustomerProfile } from "@/lib/customerProfile";
 
 type AppRole = "owner" | "staff" | "customer";
 type DemoUser = { id: string; email: string | null };
@@ -13,6 +15,7 @@ const DEMO_PASSWORD = "password123";
 const STAFF_DEMO_EMAIL = "staff@flourish.local";
 const STAFF_DEMO_PASSWORD = "staff123";
 const DEMO_STORAGE_KEY = "flourish-demo-auth";
+const STAFF_ID_STORAGE_KEY = "flourish-staff-id";
 const ROLE_COOKIE = "flourish-role";
 const appRoles: AppRole[] = ["owner", "staff", "customer"];
 
@@ -63,32 +66,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [writeRoleCookie]);
 
-  const setDemoSession = useCallback((email = DEMO_EMAIL, fullName = "Salon Admin", nextRole: AppRole = "owner") => {
-    const demoUser = { id: "demo-user", email };
-    const demoSession = { user: demoUser, access_token: nextRole === "staff" ? "flourish-demo-staff" : "flourish-demo-admin" };
+  const setDemoSession = useCallback((email = DEMO_EMAIL, fullName = "Salon Admin", nextRole: AppRole = "owner", staffId?: string) => {
+    const demoUser = { id: staffId || "demo-user", email };
+    const demoSession = { user: demoUser, access_token: "demo-access-token" };
     setSession(demoSession);
     setUser(demoUser);
     setProfile({ full_name: fullName, email });
     setRole(nextRole);
     writeRoleCookie(nextRole);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({ email, fullName, role: nextRole }));
+      window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({ email, fullName, role: nextRole, staffId }));
+      if (staffId) window.localStorage.setItem(STAFF_ID_STORAGE_KEY, staffId);
+      else window.localStorage.removeItem(STAFF_ID_STORAGE_KEY);
     }
   }, [writeRoleCookie]);
+
+  const syncCustomerIfNeeded = useCallback(async (session: Session | null) => {
+    if (!session?.user) return;
+    try {
+      const roleRes = await supabase.from("user_roles").select("role").eq("user_id", session.user.id);
+      const roles = roleRes.data?.map((item) => item.role) || [];
+      if (!roles.includes("owner") && !roles.includes("staff")) {
+        await syncSupabaseCustomerProfile(session.user);
+      }
+    } catch {
+      // Profile sync is best-effort so auth never blocks on RLS/network issues.
+    }
+  }, []);
 
   useEffect(() => {
     const storedDemo = typeof window !== "undefined" ? window.localStorage.getItem(DEMO_STORAGE_KEY) : null;
     if (storedDemo) {
-      const { email, fullName, role } = JSON.parse(storedDemo) as { email: string; fullName: string; role?: AppRole };
-      setDemoSession(email, fullName, role || "owner");
-      setLoading(false);
-      return;
+      try {
+        const { email, fullName, role, staffId } = JSON.parse(storedDemo) as { email: string; fullName: string; role?: AppRole; staffId?: string };
+        setDemoSession(email, fullName, role || "owner", staffId);
+        setLoading(false);
+        return;
+      } catch {
+        window.localStorage.removeItem(DEMO_STORAGE_KEY);
+      }
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
+        setTimeout(() => syncCustomerIfNeeded(session), 0);
         setTimeout(() => fetchUserData(session.user.id), 0);
       } else {
         setProfile(null);
@@ -102,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
+          syncCustomerIfNeeded(session);
           fetchUserData(session.user.id);
         }
         setLoading(false);
@@ -111,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserData, setDemoSession]);
+  }, [fetchUserData, setDemoSession, syncCustomerIfNeeded]);
 
   const signIn: AuthContextType["signIn"] = async (email, password) => {
     if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
@@ -120,8 +144,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (email.trim().toLowerCase() === STAFF_DEMO_EMAIL && password === STAFF_DEMO_PASSWORD) {
-      setDemoSession(STAFF_DEMO_EMAIL, "Sara Ahmed", "staff");
+      setDemoSession(STAFF_DEMO_EMAIL, "Sara Ahmed", "staff", "stf-sara");
       return { error: null, role: "staff" };
+    }
+
+    if (email.trim().toLowerCase().endsWith("@flourish.local")) {
+      try {
+        const res = await fetch(`${API_URL}/api/auth/staff-login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setDemoSession(data.staff.email, data.staff.name, "staff", data.staff.id);
+          return { error: null, role: "staff" };
+        }
+        return { error: data.error || "Invalid staff email or password" };
+      } catch {
+        return { error: "Staff login API is unavailable. Start the Express API and try again." };
+      }
     }
 
     try {
@@ -152,6 +194,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
         },
       });
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user) await syncSupabaseCustomerProfile(data.session.user, fullName).catch(() => undefined);
       return { error: error?.message ?? null };
     } catch {
       setDemoSession(email, fullName || "Customer", "customer");
@@ -167,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(DEMO_STORAGE_KEY);
+      window.localStorage.removeItem(STAFF_ID_STORAGE_KEY);
     }
     if (typeof document !== "undefined") {
       document.cookie = `${ROLE_COOKIE}=; path=/; max-age=0; SameSite=Lax`;

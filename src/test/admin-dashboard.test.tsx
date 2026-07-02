@@ -2,6 +2,7 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/pages/Dashboard";
+import { localDateKey } from "@/lib/date";
 
 const mocks = vi.hoisted(() => ({
   toast: {
@@ -48,7 +49,7 @@ const apiResponse = (body: unknown, ok = true): MockResponse => ({
   json: vi.fn().mockResolvedValue(body),
 });
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDateKey();
 
 const services = [
   { id: "svc-haircut", name: "Signature Haircut", price: 3500 },
@@ -77,7 +78,6 @@ const metrics = {
   appointmentsToday: 1,
   revenueToday: 3500,
   totalCustomers: 2,
-  lowStockCount: 1,
 };
 
 const invoices = [
@@ -126,7 +126,7 @@ describe("Admin dashboard smoke and regression", () => {
     expect(await screen.findAllByText("Today's Appointments")).toHaveLength(2);
     expect(screen.getAllByText("Rs. 3,500")).toHaveLength(2);
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText("1 inventory alerts")).toBeInTheDocument();
+    expect(screen.getByText("Active customer records")).toBeInTheDocument();
     expect(screen.getByText("Amina Khan")).toBeInTheDocument();
     expect(screen.getByText("Signature Haircut")).toBeInTheDocument();
     expect(screen.getByText("Sara Ahmed")).toBeInTheDocument();

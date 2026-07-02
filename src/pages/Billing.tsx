@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { io, Socket } from "socket.io-client";
 import { Banknote, CreditCard, Download, Plus, Receipt, Smartphone, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_UNAVAILABLE_MESSAGE, API_URL, getAuthHeaders } from "@/lib/api";
+import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localDateKey } from "@/lib/date";
 import { toast } from "sonner";
 
 type Service = { id: string; name: string; price: number };
@@ -32,7 +34,7 @@ function downloadInvoice(invoice: Invoice) {
   const discountLine = invoice.discount > 0 ? `\nDiscount:       -${money(invoice.discount)}` : "";
   const content = `
 =======================================
-         GLAMOUR STUDIO
+         FLOURISH SALON PRO
        INVOICE ${invoice.id}
 =======================================
 
@@ -49,7 +51,7 @@ Payment Method: ${invoice.payment}
 Status:          ${invoice.status}
 ---------------------------------------
 
-Thank you for choosing Glamour Studio!
+Thank you for choosing Flourish Salon Pro!
 =======================================
   `.trim();
 
@@ -69,6 +71,8 @@ export default function Billing() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [customer, setCustomer] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [payment, setPayment] = useState("Cash");
   const [discountEnabled, setDiscountEnabled] = useState(false);
   const [discount, setDiscount] = useState("0");
@@ -78,30 +82,30 @@ export default function Billing() {
   const discountAmount = discountEnabled ? Math.max(0, Number(discount || 0)) : 0;
   const total = Math.max(0, subtotal - discountAmount);
 
-  const loadData = async () => {
-    const headers = await getAuthHeaders();
+  const loadData = useCallback(async () => {
     const [invoiceRes, serviceRes, staffRes] = await Promise.all([
-      fetch(`${API_URL}/api/invoices`, { headers }),
-      fetch(`${API_URL}/api/services`, { headers }),
-      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers }),
+      fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
     ]);
     const [invoiceData, serviceData, staffData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json()]);
-    if (!invoiceRes.ok) throw new Error(invoiceData.error || "Could not load invoices");
-    if (!serviceRes.ok) throw new Error(serviceData.error || "Could not load services");
-    if (!staffRes.ok) throw new Error(staffData.error || "Could not load staff");
-    if (!Array.isArray(invoiceData) || !Array.isArray(serviceData) || !Array.isArray(staffData)) {
-      throw new Error("The API returned an unexpected billing payload");
-    }
     setInvoices(invoiceData);
     setServices(serviceData);
     setStaff(staffData);
-  };
+  }, []);
 
   useEffect(() => {
-    loadData().catch((error) => {
-      toast.error(error instanceof TypeError ? API_UNAVAILABLE_MESSAGE : error instanceof Error ? error.message : "Could not load billing data");
-    });
-  }, []);
+    loadData().catch(() => toast.error("Could not load billing data"));
+  }, [loadData]);
+
+  useEffect(() => {
+    const socket: Socket = io(API_URL, SOCKET_OPTIONS);
+    socket.on("invoices:update", loadData);
+    socket.on("staff:commission:update", loadData);
+    return () => {
+      socket.disconnect();
+    };
+  }, [loadData]);
 
   const addItem = () => {
     const service = services[0];
@@ -137,21 +141,34 @@ export default function Billing() {
     if (service) updateItem(index, { serviceId: service.id, name: service.name, unitPrice: Number(service.price), custom: false });
   };
 
+  const resetInvoiceForm = () => {
+    setCustomer("");
+    setCustomerEmail("");
+    setCustomerPhone("");
+    setPayment("Cash");
+    setDiscount("0");
+    setDiscountEnabled(false);
+    setItems([]);
+  };
+
+  const openInvoiceDialog = () => {
+    resetInvoiceForm();
+    setShowAdd(true);
+    window.setTimeout(() => addItem(), 0);
+  };
+
   const createInvoice = async () => {
     try {
       const res = await fetch(`${API_URL}/api/invoices`, {
         method: "POST",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ customer, payment, discount: discountAmount, items }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        body: JSON.stringify({ customer, customerEmail, customerPhone, payment, status: "Paid", discount: discountAmount, items }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not create invoice");
       toast.success(`Invoice ${data.id} created for ${money(data.total)}`);
       setShowAdd(false);
-      setCustomer("");
-      setDiscount("0");
-      setDiscountEnabled(false);
-      setItems([]);
+      resetInvoiceForm();
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create invoice");
@@ -162,13 +179,13 @@ export default function Billing() {
     <div>
       <PageHeader
         title="Billing & Invoices"
-        subtitle="Service-linked invoices that feed staff commission"
-        actions={<Button onClick={() => { setShowAdd(true); if (items.length === 0) addItem(); }}><Plus className="mr-2 h-4 w-4" />New Invoice</Button>}
+        subtitle="Manual counter invoices with service lines, staff assignment, discounts, and commission sync."
+        actions={<Button onClick={openInvoiceDialog}><Plus className="mr-2 h-4 w-4" />New Invoice</Button>}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
-          { label: "Today's Sales", value: money(invoices.filter((invoice) => invoice.date === new Date().toISOString().slice(0, 10)).reduce((sum, invoice) => sum + invoice.total, 0)), sub: "paid today" },
+          { label: "Today's Sales", value: money(invoices.filter((invoice) => invoice.date === localDateKey()).reduce((sum, invoice) => sum + invoice.total, 0)), sub: "paid today" },
           { label: "All Sales", value: money(invoices.reduce((sum, invoice) => sum + invoice.total, 0)), sub: `${invoices.length} invoices` },
           { label: "Cash", value: money(invoices.filter((invoice) => invoice.payment === "Cash").reduce((sum, invoice) => sum + invoice.total, 0)), sub: "cash payments" },
           { label: "Digital", value: money(invoices.filter((invoice) => invoice.payment !== "Cash").reduce((sum, invoice) => sum + invoice.total, 0)), sub: "card/mobile payments" },
@@ -202,9 +219,16 @@ export default function Billing() {
 
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Create Invoice</DialogTitle>
+            <DialogDescription>Build the invoice from the services the client actually received at the counter.</DialogDescription>
+          </DialogHeader>
           <div className="grid gap-4 md:grid-cols-3">
             <Input placeholder="Customer name" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+            <Input placeholder="Email (optional)" value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} />
+            <Input placeholder="Phone (optional)" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} />
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
             <Select value={payment} onValueChange={setPayment}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{["Cash", "Card", "Easypaisa", "JazzCash"].map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>

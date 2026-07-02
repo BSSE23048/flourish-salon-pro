@@ -1,34 +1,48 @@
-import { useCallback, useEffect, useState } from "react";
-import { Check, Clock, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ClipboardCheck, RefreshCw, X } from "lucide-react";
+import { io, Socket } from "socket.io-client";
 import PageHeader from "@/components/PageHeader";
-import DataTable from "@/components/DataTable";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localDateKey, localMonthKey } from "@/lib/date";
 import { toast } from "sonner";
-import { io, Socket } from "socket.io-client";
 
+type AttendanceEntry = { id: string; staffId: string; date: string; status: AttendanceStatus };
+type MonthlyStaff = { staffId: string; name: string; percentage: number; rows: AttendanceEntry[] };
 type AttendanceRow = {
   staffId: string;
   name: string;
   title: string;
   availabilityStatus: string;
   attendanceStatus: string;
-  clockInAt: string | null;
-  clockOutAt: string | null;
   attendancePercentage: number;
 };
 type LeaveRequest = { id: string; staffId: string; fromDate: string; toDate: string; reason: string; status: string };
+type AttendanceStatus = "present" | "absent" | "half_day" | "paid_leave" | "unpaid_leave";
 
-function formatTime(value: string | null) {
-  return value ? new Date(value).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "-";
+const statusOptions: AttendanceStatus[] = ["present", "absent", "half_day", "paid_leave", "unpaid_leave"];
+const statusShort: Record<string, string> = {
+  present: "P",
+  absent: "A",
+  half_day: "H",
+  paid_leave: "PL",
+  unpaid_leave: "UL",
+};
+
+function daysInMonth(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const total = new Date(year, monthNumber, 0).getDate();
+  return Array.from({ length: total }, (_, index) => `${month}-${String(index + 1).padStart(2, "0")}`);
 }
 
 function statusBadge(status: string) {
-  const good = status === "present" || status === "clocked_in" || status === "clocked_out" || status === "online";
-  const warn = status === "absent" || status === "offline_today" || status === "pending";
+  const good = status === "present" || status === "paid_leave" || status === "online";
+  const warn = status === "absent" || status === "unpaid_leave" || status === "offline_today" || status === "pending";
   return (
     <Badge className={good ? "bg-success/10 text-success hover:bg-success/10" : warn ? "bg-warning/10 text-warning hover:bg-warning/10" : "bg-muted text-muted-foreground hover:bg-muted"}>
       {status.replace("_", " ")}
@@ -36,21 +50,33 @@ function statusBadge(status: string) {
   );
 }
 
+function entryFor(staff: MonthlyStaff, date: string) {
+  return staff.rows.find((entry) => entry.date === date);
+}
+
 export default function Attendance() {
-  const [rows, setRows] = useState<AttendanceRow[]>([]);
+  const [dailyRows, setDailyRows] = useState<AttendanceRow[]>([]);
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyStaff[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [date, setDate] = useState(localDateKey());
+  const [month, setMonth] = useState(localMonthKey());
   const [loading, setLoading] = useState(false);
   const [apiReady, setApiReady] = useState(false);
+
+  const monthDays = useMemo(() => daysInMonth(month), [month]);
+  const pendingLeave = leaveRequests.filter((request) => request.status === "pending");
+  const averageAttendance = monthlyRows.length
+    ? Math.round(monthlyRows.reduce((sum, row) => sum + Number(row.percentage || 0), 0) / monthlyRows.length)
+    : 0;
 
   const loadAttendance = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/attendance?date=${date}&month=${month}`, { headers: await getAuthHeaders() });
+      const res = await fetch(`${API_URL}/api/admin/attendance?date=${date}&month=${month}`, { headers: { "x-role": "admin" } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not load attendance");
-      setRows(data.staff || []);
+      setDailyRows(data.staff || []);
+      setMonthlyRows(data.monthly || []);
       setLeaveRequests(data.leaveRequests || []);
       setApiReady(true);
     } catch {
@@ -75,12 +101,12 @@ export default function Attendance() {
     };
   }, [apiReady, loadAttendance]);
 
-  const markAttendance = async (staffId: string, status: string) => {
+  const markAttendance = async (staffId: string, status: AttendanceStatus, targetDate = date) => {
     try {
       const res = await fetch(`${API_URL}/api/admin/attendance`, {
         method: "POST",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ staffId, date, status }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        body: JSON.stringify({ staffId, date: targetDate, status }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not mark attendance");
@@ -95,7 +121,7 @@ export default function Attendance() {
     try {
       const res = await fetch(`${API_URL}/api/admin/leave-requests/${requestId}`, {
         method: "PATCH",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
         body: JSON.stringify({ status }),
       });
       const data = await res.json();
@@ -110,29 +136,40 @@ export default function Attendance() {
   return (
     <div>
       <PageHeader
-        title="Daily Attendance"
-        subtitle="Admin-managed attendance, leave approvals, and monthly percentages"
+        title="Attendance"
+        subtitle="Month-wise staff attendance ledger with realtime admin updates."
         actions={
           <Button variant="outline" onClick={loadAttendance} disabled={loading}>
-            <RefreshCw className="mr-2 h-4 w-4" />Refresh
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
           </Button>
         }
       />
 
-      <div className="mb-6 grid gap-3 md:grid-cols-[180px_180px_1fr]">
+      <div className="mb-6 grid gap-4 md:grid-cols-[180px_180px_1fr_1fr]">
+        <Input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setDate(`${event.target.value}-01`); }} />
         <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-        <Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
-        <div className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
-          Pending leave alerts: <span className="font-semibold text-foreground">{leaveRequests.filter((request) => request.status === "pending").length}</span>
-        </div>
+        <Card className="shadow-card">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Average attendance</p>
+            <p className="mt-1 text-2xl font-semibold">{averageAttendance}%</p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-card">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Pending leave alerts</p>
+            <p className="mt-1 text-2xl font-semibold">{pendingLeave.length}</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {leaveRequests.filter((request) => request.status === "pending").length > 0 && (
-        <div className="mb-6 rounded-xl border border-border bg-card shadow-card">
-          <div className="border-b border-border p-4 text-sm font-semibold">Leave Requests</div>
-          <div className="divide-y divide-border">
-            {leaveRequests.filter((request) => request.status === "pending").map((request) => {
-              const staffName = rows.find((row) => row.staffId === request.staffId)?.name || request.staffId;
+      {pendingLeave.length > 0 && (
+        <Card className="mb-6 shadow-card">
+          <CardHeader className="border-b border-border p-4">
+            <CardTitle className="text-sm">Leave Requests</CardTitle>
+          </CardHeader>
+          <CardContent className="divide-y divide-border p-0">
+            {pendingLeave.map((request) => {
+              const staffName = dailyRows.find((row) => row.staffId === request.staffId)?.name || request.staffId;
               return (
                 <div key={request.id} className="grid gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div>
@@ -146,40 +183,93 @@ export default function Attendance() {
                 </div>
               );
             })}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="rounded-xl border border-border bg-card shadow-card">
-        <div className="border-b border-border p-5">
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><Clock className="h-4 w-4" />Attendance for {date}</h3>
-        </div>
-        <DataTable
-          columns={[
-            { key: "name", label: "Staff", render: (row) => <span className="font-medium">{row.name}</span> },
-            { key: "title", label: "Role" },
-            { key: "availabilityStatus", label: "Availability", render: (row) => statusBadge(row.availabilityStatus) },
-            { key: "attendanceStatus", label: "Today", render: (row) => statusBadge(row.attendanceStatus) },
-            { key: "attendancePercentage", label: "Month %", render: (row) => `${row.attendancePercentage}%` },
-            { key: "clockInAt", label: "Clock In", render: (row) => formatTime(row.clockInAt) },
-            { key: "clockOutAt", label: "Clock Out", render: (row) => formatTime(row.clockOutAt) },
-            {
-              key: "actions",
-              label: "Admin Mark",
-              render: (row) => (
-                <Select value={row.attendanceStatus} onValueChange={(value) => markAttendance(row.staffId, value)}>
-                  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["present", "absent", "half_day", "paid_leave", "unpaid_leave"].map((option) => <SelectItem key={option} value={option}>{option.replace("_", " ")}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              ),
-            },
-          ]}
-          data={rows}
-          emptyMessage="No attendance data yet"
-        />
-      </div>
+      <Card className="mb-6 shadow-card">
+        <CardHeader className="border-b border-border p-5">
+          <CardTitle className="flex items-center gap-2 text-sm"><ClipboardCheck className="h-4 w-4" />Daily Marking for {date}</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Staff</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Availability</TableHead>
+                <TableHead>Today</TableHead>
+                <TableHead>Month %</TableHead>
+                <TableHead>Admin Mark</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dailyRows.map((row) => (
+                <TableRow key={row.staffId}>
+                  <TableCell className="font-medium">{row.name}</TableCell>
+                  <TableCell>{row.title}</TableCell>
+                  <TableCell>{statusBadge(row.availabilityStatus)}</TableCell>
+                  <TableCell>{statusBadge(row.attendanceStatus)}</TableCell>
+                  <TableCell>{row.attendancePercentage}%</TableCell>
+                  <TableCell>
+                    <Select value={row.attendanceStatus} onValueChange={(value) => markAttendance(row.staffId, value as AttendanceStatus)}>
+                      <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {statusOptions.map((option) => <SelectItem key={option} value={option}>{option.replace("_", " ")}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-card">
+        <CardHeader className="border-b border-border p-5">
+          <CardTitle className="text-sm">Month Ledger</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-medium text-muted-foreground">Staff</th>
+                  <th className="px-3 py-3 text-left font-medium text-muted-foreground">%</th>
+                  {monthDays.map((day) => (
+                    <th key={day} className="px-2 py-3 text-center text-xs font-medium text-muted-foreground">{Number(day.slice(-2))}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {monthlyRows.map((staff) => (
+                  <tr key={staff.staffId} className="border-b border-border/60 last:border-0">
+                    <td className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">{staff.name}</td>
+                    <td className="px-3 py-3 font-semibold text-primary">{staff.percentage}%</td>
+                    {monthDays.map((day) => {
+                      const entry = entryFor(staff, day);
+                      const value = entry?.status || "absent";
+                      return (
+                        <td key={day} className="px-1 py-2 text-center">
+                          <Select value={value} onValueChange={(next) => markAttendance(staff.staffId, next as AttendanceStatus, day)}>
+                            <SelectTrigger className="mx-auto h-8 w-14 justify-center px-2 text-xs">
+                              <SelectValue>{statusShort[value] || "-"}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {statusOptions.map((option) => <SelectItem key={option} value={option}>{option.replace("_", " ")}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localDateKey, localMonthKey } from "@/lib/date";
 import { toast } from "sonner";
 
 type Service = {
@@ -49,11 +50,6 @@ type Metrics = {
   appointmentsToday: number;
   revenueToday: number;
   totalCustomers: number;
-  lowStockCount: number;
-  activeClients?: number;
-  ledgerRevenue?: number;
-  netProfit?: number;
-  netProfitMargin?: number;
 };
 
 type PayrollResponse = {
@@ -67,7 +63,6 @@ const emptyMetrics: Metrics = {
   appointmentsToday: 0,
   revenueToday: 0,
   totalCustomers: 0,
-  lowStockCount: 0,
 };
 
 const statusMap: Record<string, AppointmentStatus> = {
@@ -80,7 +75,7 @@ const statusMap: Record<string, AppointmentStatus> = {
 };
 
 function todayInputValue() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateKey();
 }
 
 function currentMonthValue() {
@@ -96,7 +91,7 @@ function displayTime(value: string) {
 }
 
 function monthKey(date: Date) {
-  return date.toISOString().slice(0, 7);
+  return localMonthKey(date);
 }
 
 function monthLabel(key: string) {
@@ -104,7 +99,6 @@ function monthLabel(key: string) {
 }
 
 function buildRevenueData(invoices: Invoice[]) {
-  const rows = Array.isArray(invoices) ? invoices : [];
   const start = new Date();
   start.setDate(1);
   start.setMonth(start.getMonth() - 5);
@@ -113,7 +107,7 @@ function buildRevenueData(invoices: Invoice[]) {
     const date = new Date(start);
     date.setMonth(start.getMonth() + index);
     const key = monthKey(date);
-    const revenue = rows
+    const revenue = invoices
       .filter((invoice) => String(invoice.date).startsWith(key) && invoice.status === "Paid")
       .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
 
@@ -146,14 +140,13 @@ export default function Dashboard() {
 
   const loadData = async () => {
     const month = currentMonthValue();
-    const headers = await getAuthHeaders();
     const [appointmentRes, serviceRes, staffRes, metricsRes, invoiceRes, payrollRes] = await Promise.all([
-      fetch(`${API_URL}/api/appointments`, { headers }),
-      fetch(`${API_URL}/api/services`, { headers }),
-      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers }),
-      fetch(`${API_URL}/api/admin/metrics`, { headers }),
-      fetch(`${API_URL}/api/invoices`, { headers }),
-      fetch(`${API_URL}/api/payroll?month=${month}`, { headers }),
+      fetch(`${API_URL}/api/appointments`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/metrics`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/payroll?month=${month}`, { headers: { "x-role": "admin" } }),
     ]);
 
     if (![appointmentRes, serviceRes, staffRes, metricsRes, invoiceRes, payrollRes].every((res) => res.ok)) {
@@ -191,21 +184,19 @@ export default function Dashboard() {
 
   useEffect(() => {
     const socket: Socket = io(API_URL, SOCKET_OPTIONS);
-    socket.on("appointments:update", () => loadData().catch(() => undefined));
+    socket.on("appointments:update", setAppointments);
     socket.on("invoices:update", (rows: Invoice[]) => {
       setInvoices(rows);
       loadData().catch(() => undefined);
     });
     socket.on("staff:update", () => loadData().catch(() => undefined));
-    socket.on("attendance:update", () => loadData().catch(() => undefined));
-    socket.on("security:staff-password-updated", () => loadData().catch(() => undefined));
     return () => {
       socket.disconnect();
     };
   }, []);
 
   const appointmentRows = useMemo(() => appointments
-    .filter((appointment) => appointment.startAt.slice(0, 10) === todayInputValue())
+    .filter((appointment) => localDateKey(new Date(appointment.startAt)) === todayInputValue())
     .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
     .map((appointment) => ({
       ...appointment,
@@ -238,7 +229,7 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${API_URL}/api/appointments`, {
         method: "POST",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
         body: JSON.stringify(form),
       });
       const data = await res.json();
@@ -302,9 +293,9 @@ export default function Dashboard() {
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Today's Appointments" value={metrics.appointmentsToday} icon={<Calendar className="h-5 w-5" />} subtitle={`${appointmentRows.length} shown in schedule`} />
-        <StatCard title="Today's Revenue" value={money(metrics.revenueToday)} icon={<DollarSign className="h-5 w-5" />} subtitle={`${money(metrics.ledgerRevenue || 0)} ledger revenue`} />
-        <StatCard title="Active Clients" value={metrics.activeClients ?? metrics.totalCustomers} icon={<Users className="h-5 w-5" />} subtitle={`${metrics.lowStockCount} inventory alerts`} />
-        <StatCard title="Net Profit" value={money(metrics.netProfit || monthlyRevenue)} icon={<TrendingUp className="h-5 w-5" />} subtitle={`${metrics.netProfitMargin || 0}% margin, ${invoiceCount} paid invoices`} />
+        <StatCard title="Today's Revenue" value={money(metrics.revenueToday)} icon={<DollarSign className="h-5 w-5" />} subtitle="Paid invoice revenue" />
+        <StatCard title="Total Customers" value={metrics.totalCustomers} icon={<Users className="h-5 w-5" />} subtitle="Active customer records" />
+        <StatCard title="Monthly Revenue" value={money(monthlyRevenue)} icon={<TrendingUp className="h-5 w-5" />} subtitle={`${invoiceCount} paid invoices`} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

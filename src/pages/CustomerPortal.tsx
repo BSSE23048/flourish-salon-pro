@@ -11,9 +11,9 @@ import {
 } from "framer-motion";
 import type { Variants } from "framer-motion";
 import {
-  CalendarDays, Check, Clock, CreditCard, MapPin, Menu, Phone,
+  CalendarDays, Check, Clock, MapPin, Menu, Phone,
   Scissors, ShieldCheck, Sparkles, Star, UserRound, Users, X,
-  ArrowRight, ArrowDown, ChevronRight, ChevronLeft, Play,
+  ArrowRight, ArrowDown, ChevronRight, ChevronLeft, Play, Eye, EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,9 @@ import Carousel from "@/components/Carousel";
 import StickyScrollGallery from '@/components/StickyScrollGallery';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
-import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
+import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { syncSupabaseCustomerProfile } from "@/lib/customerProfile";
+import { localDateKey } from "@/lib/date";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +35,7 @@ import { cn } from "@/lib/utils";
    ──────────────────────────────────────────────────────────────────────────── */
 type Service = {
   id: string; name: string; category: string;
-  durationMinutes: number; price: number; deposit: number;
+  durationMinutes: number; price: number;
   description: string; imageUrl?: string;
 };
 type StaffMember = { id: string; name: string; title: string; specialties: string[]; bio: string };
@@ -46,7 +48,7 @@ const BOOKING_STEPS = [
   { key: "service", label: "Service", icon: Scissors },
   { key: "staff",   label: "Artist",  icon: Users },
   { key: "time",    label: "Time",    icon: CalendarDays },
-  { key: "confirm", label: "Confirm", icon: CreditCard },
+  { key: "confirm", label: "Confirm", icon: Check },
 ];
 
 const NAV_ITEMS = [
@@ -91,7 +93,7 @@ const GALLERY_ITEMS = [
    Helpers
    ──────────────────────────────────────────────────────────────────────────── */
 function money(v: number) { return `Rs. ${v.toLocaleString()}`; }
-function todayInputValue() { return new Date().toISOString().slice(0, 10); }
+function todayInputValue() { return localDateKey(); }
 function initials(name: string) { return name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase(); }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -204,14 +206,17 @@ export default function CustomerPortal() {
   const [holdId, setHoldId]       = useState<string | null>(null);
   const [customerName, setCustomerName]   = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [loading, setLoading]     = useState(false);
   const [showBooking, setShowBooking]     = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [authFullName, setAuthFullName] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [session, setSession]     = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [apiReady, setApiReady]   = useState(false);
@@ -251,8 +256,11 @@ export default function CustomerPortal() {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session); setAuthReady(true);
+      if (data.session?.user) {
+        await syncSupabaseCustomerProfile(data.session.user).catch(() => undefined);
+      }
       if (data.session && window.localStorage.getItem("flourish-pending-booking") === "true") {
         window.localStorage.removeItem("flourish-pending-booking");
         openPendingBooking();
@@ -260,6 +268,9 @@ export default function CustomerPortal() {
     }).catch(() => setAuthReady(true));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, next) => {
       setSession(next);
+      if (next?.user) {
+        syncSupabaseCustomerProfile(next.user).catch(() => undefined);
+      }
       if (next && window.localStorage.getItem("flourish-pending-booking") === "true") {
         window.localStorage.removeItem("flourish-pending-booking");
         setAuthModalOpen(false); openPendingBooking();
@@ -322,74 +333,56 @@ export default function CustomerPortal() {
 
   const openBooking = () => {
     if (!authReady) return;
-    if (!session) {
-      setAuthMode("login");
-      setAuthModalOpen(true);
-      setMobileNavOpen(false);
-      return;
-    }
+    if (!session) { setAuthModalOpen(true); setMobileNavOpen(false); return; }
     openPendingBooking();
   };
 
-  const submitClientAuth = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!authEmail || !authPassword) {
-      toast.error("Email and password are required.");
-      return;
-    }
+  const completeBookingAuth = (nextSession: Session | null) => {
+    if (nextSession) setSession(nextSession);
+    setAuthModalOpen(false);
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthName("");
+    openPendingBooking();
+  };
 
-    setLoading(true);
+  const handleBookingAuth = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthSubmitting(true);
     try {
-      if (authMode === "register") {
-        if (!authFullName.trim()) {
-          toast.error("Full name is required.");
-          return;
-        }
+      if (authMode === "signup") {
         const { data, error } = await supabase.auth.signUp({
           email: authEmail,
           password: authPassword,
-          options: {
-            data: { full_name: authFullName, role: "client" },
-            emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
-          },
+          options: { data: { full_name: authName } },
         });
         if (error) throw error;
-        setSession(data.session);
-        setCustomerName(authFullName);
-        setCustomerEmail(authEmail);
-        toast.success(data.session ? "Client account created." : "Account created. Check your email if verification is enabled.");
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-        if (error) throw error;
-        setSession(data.session);
-        setCustomerName(String(data.session?.user.user_metadata?.full_name || customerName || ""));
-        setCustomerEmail(data.session?.user.email || authEmail);
-        toast.success("Signed in. Choose your appointment.");
+        if (data.session) {
+          await syncSupabaseCustomerProfile(data.session.user, authName).catch(() => undefined);
+          toast.success("Account created. Let's book your appointment.");
+          completeBookingAuth(data.session);
+        } else {
+          toast.success("Account created. Please check your email to confirm your account.");
+        }
+        return;
       }
 
-      setAuthModalOpen(false);
-      openPendingBooking();
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      if (data.session?.user) await syncSupabaseCustomerProfile(data.session.user).catch(() => undefined);
+      toast.success("Signed in. Let's book your appointment.");
+      completeBookingAuth(data.session);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not sign in");
     } finally {
-      setLoading(false);
+      setAuthSubmitting(false);
     }
   };
 
-  const loginClientWithGoogle = async () => {
-    try {
-      window.localStorage.setItem("flourish-pending-booking", "true");
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
-        },
-      });
-      if (error) throw error;
-    } catch (error) {
-      window.localStorage.removeItem("flourish-pending-booking");
-      toast.error(error instanceof Error ? error.message : "Google login failed");
-    }
+  const signInWithGoogle = async () => {
+    window.localStorage.setItem("flourish-pending-booking", "true");
+    const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined } });
+    if (error) toast.error(error.message);
   };
 
   const signOut = async () => {
@@ -403,7 +396,7 @@ export default function CustomerPortal() {
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/holds`, {
-        method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: selectedDate, time: slot.time, staffId: artist.id, serviceId: service.id, customerEmail }),
       });
       const data = await res.json();
@@ -421,7 +414,7 @@ export default function CustomerPortal() {
     if (!service || !artist) return;
     if (!customerEmail || !customerName) { toast.error("Add your name and email first."); return; }
     const res = await fetch(`${API_URL}/api/waitlist`, {
-      method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ customerName, customerEmail, staffId: artist.id, serviceId: service.id, startAt: slot.startAt }),
     });
     if (res.ok) toast.success("You're on the waitlist — we'll notify you.");
@@ -430,11 +423,12 @@ export default function CustomerPortal() {
   const confirmBooking = async () => {
     if (!service || !artist || !selectedSlot) return;
     if (!customerName || !customerEmail) { toast.error("Name and email are required."); return; }
+    if (customerPhone.replace(/\D/g, "").length < 7) { toast.error("A valid phone number is required."); return; }
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/bookings`, {
-        method: "POST", headers: await getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ holdId, customerName, customerEmail, staffId: artist.id, serviceId: service.id, date: selectedDate, time: selectedSlot.time }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ holdId, customerName, customerEmail, customerPhone, staffId: artist.id, serviceId: service.id, date: selectedDate, time: selectedSlot.time }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Booking failed");
@@ -561,11 +555,6 @@ export default function CustomerPortal() {
                   </motion.a>
                 ))}
                 <div className="pt-4 space-y-2 border-t border-[#e8e0d4] mt-3">
-                  {!session && (
-                    <Link href="/login" className="flex h-12 w-full items-center justify-center rounded-full border border-[#d8cfc0] text-[13px] font-semibold text-[#1a1a18]">
-                      Log in
-                    </Link>
-                  )}
                   <button onClick={openBooking} disabled={!authReady} className="w-full h-12 rounded-full bg-[#2c5545] text-white text-[13px] font-semibold flex items-center justify-center gap-2">
                     <CalendarDays className="w-4 h-4" /> Book Appointment
                   </button>
@@ -725,7 +714,6 @@ export default function CustomerPortal() {
                             <span>{item.durationMinutes} min</span>
                             <span className="w-1 h-1 rounded-full bg-[#e8e0d4]" />
                             <span className="font-semibold text-[#2c5545]">{money(item.price)}</span>
-                            {item.deposit > 0 && (<><span className="w-1 h-1 rounded-full bg-[#e8e0d4]" /><span>{money(item.deposit)} deposit</span></>)}
                           </div>
                         </motion.button>
                       );
@@ -816,7 +804,6 @@ export default function CustomerPortal() {
                     {service && (<>
                       <div className="h-px bg-[#e8e0d4]" />
                       <div className="flex justify-between"><span className="text-[#7a7168]">Price</span><span className="font-semibold text-[#2c5545]">{money(service.price)}</span></div>
-                      {service.deposit > 0 && <div className="flex justify-between"><span className="text-[#7a7168]">Deposit</span><span className="font-semibold">{money(service.deposit)}</span></div>}
                     </>)}
                   </div>
                   {selectedSlot && (
@@ -826,14 +813,15 @@ export default function CustomerPortal() {
                   )}
                   <div className="space-y-3 mb-5">
                     <Input placeholder="Full name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-11" />
-                    <Input type="email" placeholder="Email address" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} className="h-11" />
+                    <Input type="email" placeholder="Email address" value={customerEmail} readOnly disabled className="h-11 bg-[#f0ebe3] text-[#7a7168]" />
+                    <Input type="tel" placeholder="Phone number" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="h-11" required />
                   </div>
-                  <motion.button onClick={confirmBooking} disabled={!selectedSlot || loading || !customerName || !customerEmail}
+                  <motion.button onClick={confirmBooking} disabled={!selectedSlot || loading || !customerName || !customerEmail || customerPhone.replace(/\D/g, "").length < 7}
                     className="w-full h-12 rounded-full bg-[#2c5545] text-white text-[13px] font-semibold flex items-center justify-center gap-2 disabled:opacity-35 disabled:cursor-not-allowed group relative overflow-hidden"
                     whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   >
                     <span className="absolute inset-0 bg-[#1e3d30] origin-bottom scale-y-0 group-hover:scale-y-100 transition-transform duration-500" />
-                    <span className="relative z-10">{loading ? "Confirming…" : "Confirm & Pay Deposit"}</span>
+                    <span className="relative z-10">{loading ? "Confirming..." : "Confirm Booking"}</span>
                     {!loading && <ArrowRight className="w-4 h-4 relative z-10" />}
                   </motion.button>
                 </div>
@@ -1262,94 +1250,121 @@ export default function CustomerPortal() {
 
       {/* ═══════════════════════ AUTH MODAL ═══════════════════════ */}
       <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
-        <DialogContent className="sm:max-w-md p-0 overflow-hidden rounded-[28px] border-0">
-          <div className="bg-[#05150e] px-8 py-10 relative">
-            {/* Subtle texture overlay */}
-            <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
-              style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "32px 32px" }}
+        <DialogContent className="overflow-hidden rounded-[32px] border-0 bg-[#FAF7F2] p-0 shadow-[0_30px_90px_rgba(5,21,14,0.28)] sm:max-w-[460px]">
+          <div className="relative overflow-hidden bg-[#05150e] px-8 pb-8 pt-9">
+            <div
+              className="absolute inset-0 opacity-[0.04]"
+              style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "28px 28px" }}
             />
             <DialogHeader className="relative z-10">
-              <div className="w-11 h-11 rounded-xl bg-[#485341] flex items-center justify-center mb-5">
-                <Sparkles className="w-5 h-5 text-white" />
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-[#485341] shadow-lg shadow-black/20">
+                <Sparkles className="h-5 w-5 text-white" />
               </div>
-              <DialogTitle className="font-sans font-bold text-[32px] text-white tracking-tight">
-                {authMode === "register" ? "Create client account" : "Client login"}
+              <DialogTitle className="font-sans text-[30px] font-bold tracking-tight text-white">
+                {authMode === "login" ? "Sign in to book" : "Create your account"}
               </DialogTitle>
-              <DialogDescription className="text-white/55 text-[14px] leading-relaxed mt-2">
-                Sign in as a client to reserve your stylist and hold a live appointment slot.
+              <DialogDescription className="mt-2 text-[14px] leading-relaxed text-white/60">
+                {authMode === "login"
+                  ? "Log in to reserve your stylist, hold a live slot, and confirm your appointment."
+                  : "Create a client profile so your booking details stay safe and easy to manage."}
               </DialogDescription>
             </DialogHeader>
           </div>
-          <div className="bg-[#FAF7F2] p-8">
-            <form onSubmit={submitClientAuth} className="space-y-4">
-              {authMode === "register" && (
+
+          <div className="p-8">
+            <AnimatePresence mode="wait">
+              <motion.form
+                key={authMode}
+                onSubmit={handleBookingAuth}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.22 }}
+                className="space-y-4"
+              >
+                {authMode === "signup" && (
+                  <div className="space-y-2">
+                    <label className="text-[13px] font-semibold text-[#1a1a18]">Full name</label>
+                    <Input
+                      value={authName}
+                      onChange={(event) => setAuthName(event.target.value)}
+                      placeholder="Ayesha Khan"
+                      required
+                      className="h-12 rounded-2xl border-[#e0d8cc] bg-white px-4 text-[14px] focus-visible:ring-[#2c5545]"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-2">
-                  <label className="block text-[13px] font-semibold text-[#1a1a18]">Full name</label>
+                  <label className="text-[13px] font-semibold text-[#1a1a18]">Email address</label>
                   <Input
-                    value={authFullName}
-                    onChange={(event) => setAuthFullName(event.target.value)}
-                    placeholder="Your full name"
-                    className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
-                    autoFocus
+                    type="email"
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    required
+                    className="h-12 rounded-2xl border-[#e0d8cc] bg-white px-4 text-[14px] focus-visible:ring-[#2c5545]"
                   />
                 </div>
-              )}
-              <div className="space-y-2">
-                <label className="block text-[13px] font-semibold text-[#1a1a18]">Email address</label>
-                <Input
-                  type="email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  placeholder="you@example.com"
-                  className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
-                  autoFocus={authMode === "login"}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-[13px] font-semibold text-[#1a1a18]">Password</label>
-                <Input
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="Enter your password"
-                  minLength={authMode === "register" ? 10 : 6}
-                  className="h-12 rounded-2xl border-[#e8e0d4] bg-white"
-                />
-              </div>
-              <Button
-                type="submit"
-                disabled={loading}
-                className="h-12 w-full rounded-full bg-[#485341] text-[13px] font-semibold text-white hover:bg-[#384232]"
-              >
-                {loading ? "Please wait..." : authMode === "register" ? "Create account and book" : "Login and book"}
-              </Button>
-            </form>
 
-            <div className="my-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-[#e8e0d4]" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9086]">or</span>
-              <div className="h-px flex-1 bg-[#e8e0d4]" />
+                <div className="space-y-2">
+                  <label className="text-[13px] font-semibold text-[#1a1a18]">Password</label>
+                  <div className="relative">
+                    <Input
+                      type={showAuthPassword ? "text" : "password"}
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                      placeholder="Enter your password"
+                      required
+                      minLength={6}
+                      className="h-12 rounded-2xl border-[#e0d8cc] bg-white px-4 pr-12 text-[14px] focus-visible:ring-[#2c5545]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAuthPassword((visible) => !visible)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#7a7168] transition-colors hover:text-[#1a1a18]"
+                      aria-label={showAuthPassword ? "Hide password" : "Show password"}
+                    >
+                      {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={authSubmitting}
+                  className="h-12 w-full rounded-2xl bg-[#2c5545] text-[14px] font-semibold text-white shadow-lg shadow-[#2c5545]/20 hover:bg-[#244638]"
+                >
+                  {authSubmitting ? "Please wait..." : authMode === "login" ? "Login" : "Create Account"}
+                  {!authSubmitting && <ArrowRight className="h-4 w-4" />}
+                </Button>
+              </motion.form>
+            </AnimatePresence>
+
+            <div className="my-6 flex items-center gap-3">
+              <div className="h-px flex-1 bg-[#e0d8cc]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a9084]">or</span>
+              <div className="h-px flex-1 bg-[#e0d8cc]" />
             </div>
 
             <motion.button
               type="button"
-              onClick={loginClientWithGoogle}
-              className="flex h-[52px] w-full items-center gap-3 rounded-2xl border border-[#e8e0d4] bg-white px-5 text-[14px] font-semibold text-[#1a1a18] shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors hover:border-[#d8cfc0] hover:bg-[#f0ebe3]"
+              onClick={signInWithGoogle}
+              className="flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-[#e0d8cc] bg-white px-5 text-[14px] font-semibold text-[#1a1a18] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:border-[#cfc4b4] hover:bg-[#f7f1e8]"
               whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0ebe3] text-[12px] font-bold text-[#1a1a18]">G</div>
-              Login with Google
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0ebe3] text-[12px] font-black text-[#2c5545]">G</span>
+              Sign in with Google
             </motion.button>
 
             <button
               type="button"
-              onClick={() => setAuthMode((current) => current === "login" ? "register" : "login")}
-              className="mt-5 w-full text-center text-[13px] font-medium text-[#7a7168] transition-colors hover:text-[#1a1a18]"
+              onClick={() => setAuthMode((mode) => mode === "login" ? "signup" : "login")}
+              className="mt-6 w-full text-center text-[13px] font-medium text-[#7a7168] transition-colors hover:text-[#2c5545]"
             >
-              {authMode === "register" ? "Already have a client account? Log in" : "New client? Create an account"}
+              {authMode === "login" ? "Don't have an account? Create an Account" : "Already have an account? Log in"}
             </button>
-            <p className="pt-3 text-center text-[12px] font-medium text-[#7a7168]">Booking opens after client sign-in.</p>
           </div>
         </DialogContent>
       </Dialog>

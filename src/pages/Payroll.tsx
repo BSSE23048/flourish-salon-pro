@@ -5,10 +5,11 @@ import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_URL, SOCKET_OPTIONS, getAuthHeaders } from "@/lib/api";
+import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
+import { localMonthKey } from "@/lib/date";
 import { toast } from "sonner";
 
 type Adjustment = { id: string; type: "deduction" | "bonus"; amount: number; reason: string };
@@ -35,6 +36,8 @@ type Summary = {
   payrollPaid: number;
   payrollUnpaid: number;
   profitAfterPayroll: number;
+  expenseTotal: number;
+  netProfit: number;
   invoiceCount: number;
 };
 
@@ -46,6 +49,8 @@ const emptySummary: Summary = {
   payrollPaid: 0,
   payrollUnpaid: 0,
   profitAfterPayroll: 0,
+  expenseTotal: 0,
+  netProfit: 0,
   invoiceCount: 0,
 };
 
@@ -54,7 +59,7 @@ function money(value: number) {
 }
 
 export default function Payroll() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(localMonthKey());
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(false);
@@ -64,7 +69,7 @@ export default function Payroll() {
   const loadPayroll = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/payroll?month=${month}`, { headers: await getAuthHeaders() });
+      const res = await fetch(`${API_URL}/api/payroll?month=${month}`, { headers: { "x-role": "admin" } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not load payroll");
       setRows(data.rows || []);
@@ -93,15 +98,15 @@ export default function Payroll() {
   const totals = useMemo(() => [
     { label: "Net Revenue", value: money(summary.netRevenue), sub: `${summary.invoiceCount} paid invoices` },
     { label: "Payroll Payable", value: money(summary.payrollPayable), sub: "salary + commission - deductions" },
-    { label: "Payroll Paid", value: money(summary.payrollPaid), sub: `${money(summary.payrollUnpaid)} unpaid` },
-    { label: "Profit After Payroll", value: money(summary.profitAfterPayroll), sub: "net revenue minus payroll" },
+    { label: "Expenses", value: money(summary.expenseTotal), sub: "operating costs this month" },
+    { label: "Final Profit", value: money(summary.netProfit), sub: "revenue minus payroll and expenses" },
   ], [summary]);
 
   const markPaid = async (row: PayrollRow, paid: boolean) => {
     try {
       const res = await fetch(`${API_URL}/api/payroll/${row.staffId}/status`, {
         method: "PATCH",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
         body: JSON.stringify({ month, paid }),
       });
       const data = await res.json();
@@ -118,7 +123,7 @@ export default function Payroll() {
     try {
       const res = await fetch(`${API_URL}/api/payroll/adjustments`, {
         method: "POST",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
         body: JSON.stringify({ staffId: adjusting.staffId, month, ...adjustment, amount: Number(adjustment.amount) }),
       });
       const data = await res.json();
@@ -134,7 +139,7 @@ export default function Payroll() {
 
   const deleteAdjustment = async (id: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/payroll/adjustments/${id}`, { method: "DELETE", headers: await getAuthHeaders() });
+      const res = await fetch(`${API_URL}/api/payroll/adjustments/${id}`, { method: "DELETE", headers: { "x-role": "admin" } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not remove adjustment");
       toast.success("Adjustment removed");
@@ -219,7 +224,10 @@ export default function Payroll() {
 
       <Dialog open={Boolean(adjusting)} onOpenChange={(open) => !open && setAdjusting(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{adjustment.type === "deduction" ? "Add Deduction / Penalty" : "Add Bonus"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{adjustment.type === "deduction" ? "Add Deduction / Penalty" : "Add Bonus"}</DialogTitle>
+            <DialogDescription>Adjust the selected staff member&apos;s payroll for this month.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <Select value={adjustment.type} onValueChange={(value) => setAdjustment({ ...adjustment, type: value })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
