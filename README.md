@@ -131,7 +131,7 @@ Create or update `.env` with these values:
 NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-anon-key"
 NEXT_PUBLIC_API_URL="http://localhost:4000"
-CLIENT_ORIGIN="http://localhost:3000"
+CLIENT_ORIGIN="http://localhost:3000,https://your-vercel-app.vercel.app"
 PORT="4000"
 ```
 

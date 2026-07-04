@@ -7,7 +7,18 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 4000;
-const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOrigin = (origin, callback) => {
+  if (!origin || clientOrigins.includes(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error(`Origin ${origin} is not allowed by CORS`));
+};
 const businessTimeZone = process.env.BUSINESS_TIMEZONE || "Asia/Karachi";
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseKey =
@@ -21,10 +32,10 @@ const supabaseAdmin = supabaseUrl && supabaseKey && supabaseUrl !== "https://exa
   : null;
 
 const io = new Server(server, {
-  cors: { origin: clientOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
+  cors: { origin: corsOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
 });
 
-app.use(cors({ origin: clientOrigin }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "10mb" }));
 
 const BUSINESS_OPEN_MINUTES = 10 * 60;
