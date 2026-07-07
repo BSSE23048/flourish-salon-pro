@@ -15,7 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { DollarSign, Plus, ReceiptText, Scissors, Trash2, TrendingUp, Wallet } from "lucide-react";
+import { CalendarDays, DollarSign, Plus, Printer, ReceiptText, Trash2, TrendingUp } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import DataTable from "@/components/DataTable";
@@ -47,6 +47,36 @@ type Financials = {
   expenses: Expense[];
 };
 
+type Appointment = {
+  id: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  staffId: string;
+  serviceId: string;
+  startAt: string;
+  endAt?: string;
+  status: string;
+};
+
+type Service = { id: string; name: string; price: number };
+type Staff = { id: string; name: string };
+type InvoiceItem = { serviceId: string; name: string; staffId: string; quantity: number; unitPrice: number; total: number };
+type Invoice = {
+  id: string;
+  date: string;
+  customer: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  items: InvoiceItem[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  payment: string;
+  status: string;
+  createdAt?: string;
+};
+
 const emptyFinancials: Financials = {
   month: localMonthKey(),
   netRevenue: 0,
@@ -59,31 +89,9 @@ const emptyFinancials: Financials = {
   expenses: [],
 };
 
-const dailySales = [
-  { day: "Mon", sales: 12500 }, { day: "Tue", sales: 18000 }, { day: "Wed", sales: 15000 },
-  { day: "Thu", sales: 22000 }, { day: "Fri", sales: 28000 }, { day: "Sat", sales: 35000 }, { day: "Sun", sales: 8000 },
-];
-
-const popularServices = [
-  { name: "Haircut", value: 35 }, { name: "Facial", value: 25 },
-  { name: "Nails", value: 20 }, { name: "Makeup", value: 12 }, { name: "Spa", value: 8 },
-];
-
 const pieColors = [
   "hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))",
   "hsl(var(--chart-4))", "hsl(var(--chart-5))",
-];
-
-const peakHours = [
-  { hour: "9AM", appointments: 2 }, { hour: "10AM", appointments: 5 }, { hour: "11AM", appointments: 7 },
-  { hour: "12PM", appointments: 4 }, { hour: "1PM", appointments: 6 }, { hour: "2PM", appointments: 8 },
-  { hour: "3PM", appointments: 9 }, { hour: "4PM", appointments: 7 }, { hour: "5PM", appointments: 10 },
-  { hour: "6PM", appointments: 6 }, { hour: "7PM", appointments: 3 },
-];
-
-const staffRevenue = [
-  { name: "Sara", revenue: 85000 }, { name: "Nadia", revenue: 72000 },
-  { name: "Hina", revenue: 58000 }, { name: "Amina", revenue: 35000 }, { name: "Rukhsar", revenue: 44000 },
 ];
 
 const tooltipStyle = {
@@ -107,6 +115,103 @@ function formatDate(value?: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 }
 
+function shortDay(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" });
+}
+
+function buildDailySales(invoices: Invoice[], month: string) {
+  const paid = invoices.filter((invoice) => invoice.status === "Paid" && String(invoice.date).startsWith(month));
+  const days = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
+  return Array.from({ length: days }, (_, index) => {
+    const date = `${month}-${String(index + 1).padStart(2, "0")}`;
+    const sales = paid.filter((invoice) => invoice.date === date).reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+    return { day: `${shortDay(date)} ${index + 1}`, sales };
+  }).filter((row) => row.sales > 0);
+}
+
+function buildPopularServices(invoices: Invoice[], services: Service[], month: string) {
+  const serviceMap = Object.fromEntries(services.map((service) => [service.id, service.name]));
+  const totals = new Map<string, number>();
+  invoices
+    .filter((invoice) => invoice.status === "Paid" && String(invoice.date).startsWith(month))
+    .flatMap((invoice) => invoice.items || [])
+    .forEach((item) => {
+      const name = serviceMap[item.serviceId] || item.name || "Other service";
+      totals.set(name, (totals.get(name) || 0) + Number(item.quantity || 1));
+    });
+  return Array.from(totals.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+}
+
+function buildPeakHours(appointments: Appointment[], month: string) {
+  const totals = new Map<string, number>();
+  appointments
+    .filter((appointment) => localDateKey(new Date(appointment.startAt)).startsWith(month))
+    .forEach((appointment) => {
+      const date = new Date(appointment.startAt);
+      const hour = date.toLocaleTimeString("en-US", { hour: "numeric" });
+      totals.set(hour, (totals.get(hour) || 0) + 1);
+    });
+  return Array.from(totals.entries()).map(([hour, appointments]) => ({ hour, appointments }));
+}
+
+function buildStaffRevenue(invoices: Invoice[], staff: Staff[], month: string) {
+  const names = Object.fromEntries(staff.map((member) => [member.id, member.name]));
+  const totals = new Map<string, number>();
+  invoices
+    .filter((invoice) => invoice.status === "Paid" && String(invoice.date).startsWith(month))
+    .flatMap((invoice) => invoice.items || [])
+    .forEach((item) => {
+      const name = names[item.staffId] || item.staffId || "Unassigned";
+      totals.set(name, (totals.get(name) || 0) + Number(item.total || 0));
+    });
+  return Array.from(totals.entries()).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue);
+}
+
+function printInvoice(invoice: Invoice) {
+  const rows = (invoice.items || []).map((item) => `
+    <tr>
+      <td>${item.name}</td>
+      <td>${item.quantity}</td>
+      <td>${money(item.unitPrice)}</td>
+      <td>${money(item.total)}</td>
+    </tr>
+  `).join("");
+  const discountRow = invoice.discount > 0 ? `<tr><td colspan="3">Discount</td><td>-${money(invoice.discount)}</td></tr>` : "";
+  const popup = window.open("", "_blank", "width=420,height=700");
+  if (!popup) return;
+  popup.document.write(`
+    <html>
+      <head>
+        <title>${invoice.id}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #1a1a18; }
+          h1 { font-size: 20px; margin: 0; }
+          p { margin: 4px 0; font-size: 12px; color: #555; }
+          table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px; }
+          th, td { border-bottom: 1px solid #ddd; padding: 8px 4px; text-align: left; }
+          td:last-child, th:last-child { text-align: right; }
+          .total { font-size: 18px; font-weight: 700; text-align: right; margin-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <h1>Flourish Salon Pro</h1>
+        <p>Invoice ${invoice.id}</p>
+        <p>Date: ${invoice.date}</p>
+        <p>Customer: ${invoice.customer}</p>
+        <table>
+          <thead><tr><th>Service</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead>
+          <tbody>${rows}${discountRow}</tbody>
+        </table>
+        <div class="total">Total: ${money(invoice.total)}</div>
+        <p>Payment: ${invoice.payment} | Status: ${invoice.status}</p>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  popup.print();
+}
+
 function ChartCard({ title, eyebrow, children }: { title: string; eyebrow: string; children: React.ReactNode }) {
   return (
     <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
@@ -120,6 +225,10 @@ function ChartCard({ title, eyebrow, children }: { title: string; eyebrow: strin
 export default function Reports() {
   const [month, setMonth] = useState(localMonthKey());
   const [financials, setFinancials] = useState<Financials>(emptyFinancials);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
   const [expense, setExpense] = useState({
     date: localDateKey(),
@@ -131,10 +240,28 @@ export default function Reports() {
 
   const loadFinancials = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/financials?month=${month}`, { headers: { "x-role": "admin" } });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not load financials");
-      setFinancials({ ...emptyFinancials, ...data, expenses: Array.isArray(data.expenses) ? data.expenses : [] });
+      const [financialRes, appointmentRes, serviceRes, staffRes, invoiceRes] = await Promise.all([
+        fetch(`${API_URL}/api/financials?month=${month}`, { headers: { "x-role": "admin" } }),
+        fetch(`${API_URL}/api/appointments`, { headers: { "x-role": "admin" } }),
+        fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
+        fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
+        fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
+      ]);
+      if (![financialRes, appointmentRes, serviceRes, staffRes, invoiceRes].every((res) => res.ok)) {
+        throw new Error("Could not load live report data");
+      }
+      const [financialData, appointmentData, serviceData, staffData, invoiceData] = await Promise.all([
+        financialRes.json(),
+        appointmentRes.json(),
+        serviceRes.json(),
+        staffRes.json(),
+        invoiceRes.json(),
+      ]);
+      setFinancials({ ...emptyFinancials, ...financialData, expenses: Array.isArray(financialData.expenses) ? financialData.expenses : [] });
+      setAppointments(Array.isArray(appointmentData) ? appointmentData : []);
+      setServices(Array.isArray(serviceData) ? serviceData : []);
+      setStaff(Array.isArray(staffData) ? staffData : []);
+      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load financials");
     }
@@ -150,6 +277,8 @@ export default function Reports() {
     socket.on("expenses:update", loadFinancials);
     socket.on("invoices:update", loadFinancials);
     socket.on("payroll:update", loadFinancials);
+    socket.on("appointments:update", loadFinancials);
+    socket.on("staff:update", loadFinancials);
     return () => {
       socket.disconnect();
     };
@@ -161,6 +290,13 @@ export default function Reports() {
     { name: "Expenses", value: financials.expenseTotal },
     { name: "Net Profit", value: financials.netProfit },
   ], [financials]);
+  const dailySales = useMemo(() => buildDailySales(invoices, month), [invoices, month]);
+  const popularServices = useMemo(() => buildPopularServices(invoices, services, month), [invoices, month, services]);
+  const peakHours = useMemo(() => buildPeakHours(appointments, month), [appointments, month]);
+  const staffRevenue = useMemo(() => buildStaffRevenue(invoices, staff, month), [invoices, month, staff]);
+  const paidInvoices = useMemo(() =>
+    invoices.filter((invoice) => invoice.status === "Paid" && String(invoice.date).startsWith(month)),
+  [invoices, month]);
 
   const openExpenseDialog = () => {
     setExpense({ date: localDateKey(), category: "", vendor: "", amount: "", description: "" });
@@ -211,7 +347,7 @@ export default function Reports() {
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <StatCard title="Paid Revenue" value={money(financials.netRevenue)} icon={<DollarSign />} subtitle={`${financials.invoiceCount} paid invoices`} variant="success" />
-        <StatCard title="Payroll Cost" value={money(financials.payrollPayable)} icon={<Wallet />} subtitle="salary + commission" />
+        <StatCard title="Bookings" value={appointments.filter((appointment) => localDateKey(new Date(appointment.startAt)).startsWith(month)).length} icon={<CalendarDays />} subtitle="scheduled this month" />
         <StatCard title="Expenses" value={money(financials.expenseTotal)} icon={<ReceiptText />} subtitle={`${financials.expenseCount} entries`} variant="warning" />
         <StatCard
           title="Final Profit"
@@ -314,6 +450,37 @@ export default function Reports() {
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border p-5">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.15em] font-medium text-muted-foreground">Bills</p>
+            <h3 className="font-editorial text-xl text-foreground">Paid Invoice Ledger</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">{paidInvoices.length} invoices</p>
+        </div>
+        <DataTable
+          columns={[
+            { key: "id", label: "Invoice", render: (row) => <span className="font-mono text-xs font-semibold">{row.id as string}</span> },
+            { key: "date", label: "Date", render: (row) => formatDate(row.date as string) },
+            { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer as string}</span> },
+            { key: "items", label: "Services", render: (row) => (row.items as InvoiceItem[]).map((item) => `${item.name} x${item.quantity}`).join(", ") },
+            { key: "payment", label: "Payment" },
+            { key: "total", label: "Total", render: (row) => <span className="font-semibold">{money(row.total as number)}</span> },
+            {
+              key: "actions",
+              label: "",
+              render: (row) => (
+                <Button size="sm" variant="outline" onClick={() => printInvoice(row as unknown as Invoice)}>
+                  <Printer className="mr-2 h-3.5 w-3.5" />Print Bill
+                </Button>
+              ),
+            },
+          ]}
+          data={paidInvoices as unknown as Record<string, unknown>[]}
+          emptyMessage="No paid invoices for this month"
+        />
       </div>
 
       <Dialog open={showExpenseDialog} onOpenChange={setShowExpenseDialog}>

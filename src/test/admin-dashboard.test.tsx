@@ -32,6 +32,16 @@ vi.mock("sonner", () => ({
   toast: mocks.toast,
 }));
 
+vi.mock("@/lib/api", () => ({
+  API_UNAVAILABLE_MESSAGE: "Could not reach the API server at http://localhost:4000.",
+  API_URL: "http://localhost:4000",
+  SOCKET_OPTIONS: {
+    reconnectionAttempts: 1,
+    timeout: 1500,
+  },
+  getAuthHeaders: vi.fn(async (extra = {}) => ({ ...extra, Authorization: "Bearer flourish-demo-admin" })),
+}));
+
 type MockResponse = Pick<Response, "ok" | "json">;
 
 const apiResponse = (body: unknown, ok = true): MockResponse => ({
