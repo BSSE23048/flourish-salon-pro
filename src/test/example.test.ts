@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     signOut: mocks.signOut,
-    profile: { full_name: "Sara Ahmed", email: "staff@flourish.local" },
+    profile: { id: "stf-sara", full_name: "Sara Ahmed", email: "staff@flourish.local" },
   }),
 }));
 

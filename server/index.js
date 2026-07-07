@@ -1,11 +1,22 @@
 import cors from "cors";
 import express from "express";
-import fs from "fs";
+import { existsSync, readFileSync } from "node:fs";
 import http from "http";
-import path from "path";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
-import { fileURLToPath } from "url";
+
+function loadLocalEnv() {
+  if (!existsSync(".env")) return;
+  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
+    const match = line.match(/^([^#=\s]+)\s*=\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1].trim();
+    if (process.env[key]) continue;
+    process.env[key] = match[2].trim().replace(/^"|"$/g, "");
+  }
+}
+
+loadLocalEnv();
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +37,7 @@ const businessTimeZone = process.env.BUSINESS_TIMEZONE || "Asia/Karachi";
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
@@ -61,18 +73,9 @@ const today = () => dateKey(now());
 const appointmentDateKey = (appointment) => dateKey(appointment.startAt);
 const minutes = (value) => value * 60 * 1000;
 
-const services = [
-  { id: "svc-haircut", name: "Signature Haircut", category: "Hair", durationMinutes: 30, price: 3500, description: "Precision cut, consultation, and finishing polish.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-facial", name: "Botanical Facial", category: "Skin", durationMinutes: 60, price: 6500, description: "A calming skin reset with massage and glow mask.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-color", name: "Lived-In Color", category: "Color", durationMinutes: 120, price: 14500, description: "Dimensional color with toner and finish.", imageUrl: "/Hero_sec.png", active: true },
-  { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, description: "Luxury bridal consultation and makeup trial.", imageUrl: "/Hero_sec.png", active: true },
-];
+const services = [];
 
-let staff = [
-  { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, baseSalary: 65000, status: "online", credentialEmail: "sara.ahmed@flourish.local", activePassword: "staff123", passwordUpdatedAt: new Date().toISOString(), bio: "Editorial cuts, soft color, and quiet luxury finishes." },
-  { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, baseSalary: 52000, status: "online", credentialEmail: "nadia.hussain@flourish.local", activePassword: "Nadia123", passwordUpdatedAt: new Date().toISOString(), bio: "Glow-focused facials and camera-ready makeup." },
-  { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, baseSalary: 45000, status: "online", credentialEmail: "hina.rashid@flourish.local", activePassword: "Hina1234", passwordUpdatedAt: new Date().toISOString(), bio: "Detail-led treatments with calm, precise timing." },
-];
+let staff = [];
 
 const state = {
   tenant: {
@@ -83,90 +86,85 @@ const state = {
     locations: 2,
     seats: 12,
   },
-  appointments: [
-    makeAppointment({
-      id: "apt-1001",
-      customerName: "Ayesha Khan",
-      customerEmail: "ayesha@email.com",
-      staffId: "stf-sara",
-      serviceId: "svc-haircut",
-      startAt: atBusinessTime(today(), 10, 0).toISOString(),
-      status: "booked",
-    }),
-    makeAppointment({
-      id: "apt-1002",
-      customerName: "Fatima Ali",
-      customerEmail: "fatima@email.com",
-      staffId: "stf-nadia",
-      serviceId: "svc-facial",
-      startAt: atBusinessTime(today(), 23, 30).toISOString(),
-      status: "in_progress",
-    }),
-  ],
+  appointments: [],
   holds: [],
   waitlist: [],
   attendance: [],
-  customers: [
-    { id: 1, name: "Ayesha Khan", phone: "0300-1234567", email: "ayesha@email.com", notes: "Prefers Sara for haircuts", createdAt: new Date().toISOString() },
-    { id: 2, name: "Fatima Ali", phone: "0321-7654321", email: "fatima@email.com", notes: "Allergic to certain products", createdAt: new Date().toISOString() },
-  ],
-  invoices: [
-    {
-      id: "INV-1042",
-      date: today(),
-      customer: "Ayesha Khan",
-      payment: "Cash",
-      status: "Paid",
-      items: [
-        { serviceId: "svc-haircut", name: "Signature Haircut", staffId: "stf-sara", quantity: 1, unitPrice: 3500, total: 3500, custom: false },
-      ],
-      subtotal: 3500,
-      discount: 0,
-      total: 3500,
-      createdAt: new Date().toISOString(),
-    },
-  ],
+  customers: [],
+  invoices: [],
   leaveRequests: [],
   payroll: [],
   payrollAdjustments: [],
-  expenses: [
-    {
-      id: "exp-1001",
-      date: today(),
-      category: "Product purchase",
-      vendor: "Luxe Beauty Supply",
-      description: "Hair serum stock refill",
-      amount: 12000,
-      createdAt: new Date().toISOString(),
-    },
-  ],
+  expenses: [],
 };
 
-function loadPersistedDemoData() {
-  try {
-    if (!fs.existsSync(dataFile)) return;
-    const persisted = JSON.parse(fs.readFileSync(dataFile, "utf8"));
-    if (Array.isArray(persisted.staff)) staff = persisted.staff;
-    if (persisted.state && typeof persisted.state === "object") {
-      for (const key of ["tenant", "appointments", "holds", "waitlist", "attendance", "customers", "invoices", "leaveRequests", "payroll", "payrollAdjustments", "expenses"]) {
-        if (persisted.state[key] !== undefined) state[key] = persisted.state[key];
-      }
-    }
-  } catch (error) {
-    console.warn("Could not load persisted demo data; using defaults.", error);
+const supabaseTables = {
+  staff: "salon_staff_records",
+  services: "salon_service_records",
+  appointments: "salon_appointment_records",
+  attendance: "salon_attendance_records",
+  invoices: "salon_invoice_records",
+  payroll: "salon_payroll_records",
+  payrollAdjustments: "salon_payroll_adjustment_records",
+  expenses: "salon_expense_records",
+};
+
+function assignTableRows(key, rows) {
+  if (!Array.isArray(rows)) return;
+  if (key === "staff") staff = rows;
+  else if (key === "services") services.splice(0, services.length, ...rows);
+  else state[key] = rows;
+}
+
+async function readSupabaseRecords(table) {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin.from(table).select("id,data,updated_at").order("updated_at", { ascending: false });
+  if (error) {
+    console.warn(`Could not read ${table} from Supabase`, error.message);
+    return null;
+  }
+  return (data || []).map((row) => row.data).filter(Boolean);
+}
+
+async function hydrateSupabaseOperationalData() {
+  if (!supabaseAdmin) return;
+  for (const [key, table] of Object.entries(supabaseTables)) {
+    const rows = await readSupabaseRecords(table);
+    if (rows) assignTableRows(key, rows);
   }
 }
 
-function savePersistedDemoData() {
-  try {
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(dataFile, JSON.stringify({ staff, state, savedAt: new Date().toISOString() }, null, 2));
-  } catch (error) {
-    console.warn("Could not persist demo data.", error);
-  }
+async function upsertSupabaseRecord(key, record) {
+  const table = supabaseTables[key];
+  if (!supabaseAdmin || !table || !record?.id) return;
+  const { error } = await supabaseAdmin
+    .from(table)
+    .upsert({ id: String(record.id), data: record, updated_at: new Date().toISOString() }, { onConflict: "id" });
+  if (error) console.warn(`Could not upsert ${table}:${record.id}`, error.message);
 }
 
-loadPersistedDemoData();
+async function deleteSupabaseRecord(key, id) {
+  const table = supabaseTables[key];
+  if (!supabaseAdmin || !table || !id) return;
+  const { error } = await supabaseAdmin.from(table).delete().eq("id", String(id));
+  if (error) console.warn(`Could not delete ${table}:${id}`, error.message);
+}
+
+async function checkSupabaseOperationalStore() {
+  if (!supabaseAdmin) {
+    return { connected: false, mode: "local-memory", tables: {}, error: "Supabase server credentials are not configured" };
+  }
+  const results = {};
+  for (const [key, table] of Object.entries(supabaseTables)) {
+    const { data, error } = await supabaseAdmin.from(table).select("id").limit(1);
+    results[key] = { table, ok: !error, sampleRows: Array.isArray(data) ? data.length : 0, error: error?.message || null };
+  }
+  return {
+    connected: Object.values(results).every((item) => item.ok),
+    mode: "supabase",
+    tables: results,
+  };
+}
 
 const plans = [
   { id: "starter", name: "Starter", priceMonthly: 29, seats: 3, locations: 1, features: ["Bookings", "Customers", "Invoices"] },
@@ -188,7 +186,7 @@ function requireRole(...roles) {
 }
 
 function staffFromRequest(req) {
-  return req.header("x-staff-id") || "stf-sara";
+  return req.header("x-staff-id") || "";
 }
 
 function verifyPin(req, res) {
@@ -706,8 +704,14 @@ io.on("connection", (socket) => {
   });
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "flourish-salon-pro-api", checkedAt: new Date().toISOString() });
+app.get("/api/health", async (_req, res) => {
+  const database = await checkSupabaseOperationalStore();
+  res.status(database.connected ? 200 : 503).json({
+    ok: database.connected,
+    service: "flourish-salon-pro-api",
+    checkedAt: new Date().toISOString(),
+    database,
+  });
 });
 
 app.get("/api/tenant", requireRole("admin", "staff"), (_req, res) => res.json(state.tenant));
@@ -721,7 +725,7 @@ app.post("/api/services", requireRole("admin"), (req, res) => {
     ...payload,
   };
   services.push(service);
-  savePersistedDemoData();
+  void upsertSupabaseRecord("services", service);
   res.status(201).json(service);
 });
 app.patch("/api/services/:id", requireRole("admin"), (req, res) => {
@@ -735,7 +739,7 @@ app.patch("/api/services/:id", requireRole("admin"), (req, res) => {
   if (!nextService.name) return res.status(400).json({ error: "Service name is required" });
 
   services[index] = nextService;
-  savePersistedDemoData();
+  void upsertSupabaseRecord("services", nextService);
   res.json(nextService);
 });
 app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
@@ -743,7 +747,7 @@ app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
   if (index === -1) return res.status(404).json({ error: "Service not found" });
 
   const [removed] = services.splice(index, 1);
-  savePersistedDemoData();
+  void deleteSupabaseRecord("services", removed.id);
   res.json(removed);
 });
 app.get("/api/staff", (req, res) => {
@@ -782,7 +786,7 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
     passwordUpdatedAt: new Date().toISOString(),
   };
   staff.push(member);
-  savePersistedDemoData();
+  void upsertSupabaseRecord("staff", member);
   io.emit("staff:update", member);
   res.status(201).json({ ...member, credentials: { email: member.credentialEmail, password: temporaryPassword } });
 });
@@ -801,7 +805,7 @@ app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
     member.passwordUpdatedAt = new Date().toISOString();
   }
   staff[index] = member;
-  savePersistedDemoData();
+  void upsertSupabaseRecord("staff", member);
   io.emit("staff:update", member);
   res.json(member);
 });
@@ -815,7 +819,7 @@ app.patch("/api/staff/me/password", requireRole("staff", "admin"), (req, res) =>
   if (nextPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
   staffMember.activePassword = nextPassword;
   staffMember.passwordUpdatedAt = new Date().toISOString();
-  savePersistedDemoData();
+  void upsertSupabaseRecord("staff", staffMember);
   io.emit("staff:update", staffMember);
   res.json({ staffId: staffMember.id, email: staffMember.credentialEmail, passwordUpdatedAt: staffMember.passwordUpdatedAt });
 });
@@ -828,7 +832,7 @@ app.patch("/api/staff/:id/password", requireRole("admin"), (req, res) => {
   if (nextPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
   member.activePassword = nextPassword;
   member.passwordUpdatedAt = new Date().toISOString();
-  savePersistedDemoData();
+  void upsertSupabaseRecord("staff", member);
   io.emit("staff:update", member);
   res.json({ staffId: member.id, email: member.credentialEmail, password: member.activePassword, passwordUpdatedAt: member.passwordUpdatedAt });
 });
@@ -838,9 +842,11 @@ app.delete("/api/staff/:id", requireRole("admin"), (req, res) => {
   const index = staff.findIndex((member) => member.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Staff member not found" });
   const [removed] = staff.splice(index, 1);
+  const removedAppointmentIds = state.appointments.filter((appointment) => appointment.staffId === removed.id).map((appointment) => appointment.id);
   state.appointments = state.appointments.filter((appointment) => appointment.staffId !== removed.id);
   state.attendance = state.attendance.filter((entry) => entry.staffId !== removed.id);
-  savePersistedDemoData();
+  void deleteSupabaseRecord("staff", removed.id);
+  for (const appointmentId of removedAppointmentIds) void deleteSupabaseRecord("appointments", appointmentId);
   io.emit("staff:update", removed);
   io.emit("appointments:update", state.appointments);
   res.json(removed);
@@ -893,7 +899,6 @@ app.post("/api/holds", (req, res) => {
     status: "active",
   };
   state.holds.push(hold);
-  savePersistedDemoData();
   emitSchedule(staffId, date);
   res.status(201).json(hold);
 });
@@ -932,7 +937,7 @@ app.post("/api/bookings", (req, res) => {
     phone: customerPhone,
   });
   if (hold) hold.status = "converted";
-  savePersistedDemoData();
+  void upsertSupabaseRecord("appointments", appointment);
   emitSchedule(staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
   io.emit("customers:update", state.customers);
@@ -952,7 +957,6 @@ app.post("/api/waitlist", (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.waitlist.push(entry);
-  savePersistedDemoData();
   io.emit("waitlist:update", entry);
   res.status(201).json(entry);
 });
@@ -984,7 +988,7 @@ app.post("/api/appointments", requireRole("admin"), (req, res) => {
   });
   state.appointments.unshift(appointment);
   upsertCustomer({ name: appointment.customerName, email: appointment.customerEmail, phone: appointment.customerPhone });
-  savePersistedDemoData();
+  void upsertSupabaseRecord("appointments", appointment);
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
   io.emit("customers:update", state.customers);
@@ -1001,7 +1005,7 @@ app.patch("/api/appointments/:id/status", requireRole("admin", "staff"), (req, r
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
   appointment.status = req.body.status;
   appointment.updatedAt = new Date().toISOString();
-  savePersistedDemoData();
+  void upsertSupabaseRecord("appointments", appointment);
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
   io.emit("customers:update", localCustomerRows());
@@ -1017,7 +1021,7 @@ app.patch("/api/appointments/:id/cancel", (req, res) => {
   appointment.status = "cancelled";
   appointment.updatedAt = new Date().toISOString();
   notifyWaitlist(appointment);
-  savePersistedDemoData();
+  void upsertSupabaseRecord("appointments", appointment);
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
   io.emit("customers:update", localCustomerRows());
@@ -1057,7 +1061,7 @@ app.patch("/api/staff/:id/status", requireRole("admin"), (req, res) => {
   const allowed = ["online", "offline_today", "on_leave"];
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
   staffMember.status = req.body.status;
-  savePersistedDemoData();
+  void upsertSupabaseRecord("staff", staffMember);
   io.emit("staff:update", staffMember);
   res.json(staffMember);
 });
@@ -1090,7 +1094,6 @@ app.post("/api/staff/me/leave", requireRole("staff", "admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.leaveRequests.unshift(request);
-  savePersistedDemoData();
   io.emit("leave:update", request);
   res.status(201).json(request);
 });
@@ -1154,7 +1157,7 @@ app.post("/api/admin/attendance", requireRole("admin"), (req, res) => {
   entry.clockOutAt = req.body.clockOutAt || null;
   entry.markedBy = "admin";
   entry.updatedAt = new Date().toISOString();
-  savePersistedDemoData();
+  void upsertSupabaseRecord("attendance", entry);
   io.emit("attendance:update", attendanceSummary(date));
   res.status(201).json(entry);
 });
@@ -1182,10 +1185,10 @@ app.patch("/api/admin/leave-requests/:id", requireRole("admin"), (req, res) => {
       } else {
         entry.status = "paid_leave";
       }
+      void upsertSupabaseRecord("attendance", entry);
       cursor.setDate(cursor.getDate() + 1);
     }
   }
-  savePersistedDemoData();
   io.emit("leave:update", request);
   io.emit("attendance:update", attendanceSummary(request.fromDate));
   res.json(request);
@@ -1235,7 +1238,6 @@ app.post("/api/customers", requireRole("admin"), (req, res) => {
     phone: req.body.phone,
     notes: req.body.notes,
   });
-  savePersistedDemoData();
   io.emit("customers:update", state.customers);
   res.status(created ? 201 : 200).json(normalizeCustomerRecord({ ...customer, full_name: customer.name, source: "local" }));
 });
@@ -1263,7 +1265,7 @@ app.patch("/api/payroll/:staffId/status", requireRole("admin"), (req, res) => {
   record.paid = Boolean(req.body.paid);
   record.paidAt = record.paid ? new Date().toISOString() : null;
   record.updatedAt = new Date().toISOString();
-  savePersistedDemoData();
+  void upsertSupabaseRecord("payroll", { id: `${record.staffId}-${record.month}`, ...record });
   io.emit("payroll:update", payrollRows(month));
   res.json(payrollRows(month).find((row) => row.staffId === staffMember.id));
 });
@@ -1283,7 +1285,7 @@ app.post("/api/payroll/adjustments", requireRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.payrollAdjustments.unshift(adjustment);
-  savePersistedDemoData();
+  void upsertSupabaseRecord("payrollAdjustments", adjustment);
   io.emit("payroll:update", payrollRows(adjustment.month));
   res.status(201).json(adjustment);
 });
@@ -1291,7 +1293,7 @@ app.delete("/api/payroll/adjustments/:id", requireRole("admin"), (req, res) => {
   const index = state.payrollAdjustments.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Adjustment not found" });
   const [removed] = state.payrollAdjustments.splice(index, 1);
-  savePersistedDemoData();
+  void deleteSupabaseRecord("payrollAdjustments", removed.id);
   io.emit("payroll:update", payrollRows(removed.month));
   res.json(removed);
 });
@@ -1312,7 +1314,7 @@ app.post("/api/expenses", requireRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.expenses.unshift(expense);
-  savePersistedDemoData();
+  void upsertSupabaseRecord("expenses", expense);
   io.emit("expenses:update", state.expenses);
   io.emit("financials:update", financialSummary(monthKey(expense.date)));
   res.status(201).json(expense);
@@ -1321,7 +1323,7 @@ app.delete("/api/expenses/:id", requireRole("admin"), (req, res) => {
   const index = state.expenses.findIndex((expense) => expense.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Expense not found" });
   const [removed] = state.expenses.splice(index, 1);
-  savePersistedDemoData();
+  void deleteSupabaseRecord("expenses", removed.id);
   io.emit("expenses:update", state.expenses);
   io.emit("financials:update", financialSummary(monthKey(removed.date)));
   res.json(removed);
@@ -1345,7 +1347,7 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   };
   state.invoices.unshift(invoice);
   upsertCustomer({ name: invoice.customer, email: invoice.customerEmail, phone: invoice.customerPhone });
-  savePersistedDemoData();
+  void upsertSupabaseRecord("invoices", invoice);
   io.emit("invoices:update", state.invoices);
   io.emit("customers:update", localCustomerRows());
   io.emit("staff:commission:update", invoiceCommissions(monthKey(invoice.date)));
@@ -1359,6 +1361,8 @@ app.post("/api/subscription/checkout", requireRole("admin"), (req, res) => {
   if (!plan) return res.status(400).json({ error: "Unknown plan" });
   res.json({ checkoutUrl: `https://billing.example.com/checkout/${plan.id}`, plan });
 });
+
+await hydrateSupabaseOperationalData();
 
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
 

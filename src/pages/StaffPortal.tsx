@@ -94,11 +94,12 @@ export default function StaffPortal() {
   const [activeTab, setActiveTab] = useState("schedule");
   const [leave, setLeave] = useState({ fromDate: localDateKey(), toDate: localDateKey(), reason: "" });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const profileStaffId = (profile as { id?: string } | null)?.id || "";
 
   const currentStaffId = useCallback(() => {
-    if (typeof window !== "undefined") return window.localStorage.getItem(STAFF_ID_STORAGE_KEY) || "stf-sara";
-    return "stf-sara";
-  }, []);
+    if (typeof window !== "undefined") return window.localStorage.getItem(STAFF_ID_STORAGE_KEY) || profileStaffId;
+    return profileStaffId;
+  }, [profileStaffId]);
 
   const fetchSchedule = useCallback(async () => {
     const res = await fetch(`${API_URL}/api/staff/me/schedule?date=${localDateKey()}`, {
