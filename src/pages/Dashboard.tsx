@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Calendar, Clock, DollarSign, Plus, TrendingUp, Users } from "lucide-react";
+import { Calendar, Clock, DollarSign, Eye, Plus, TrendingUp, Users } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -67,6 +67,7 @@ const emptyMetrics: Metrics = {
 
 const statusMap: Record<string, AppointmentStatus> = {
   booked: "Booked",
+  confirmed: "Booked",
   arrived: "Booked",
   in_progress: "Booked",
   completed: "Completed",
@@ -124,6 +125,7 @@ export default function Dashboard() {
   const [monthlyRevenue, setMonthlyRevenue] = useState(0);
   const [invoiceCount, setInvoiceCount] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     customerName: "",
@@ -196,16 +198,18 @@ export default function Dashboard() {
   }, []);
 
   const appointmentRows = useMemo(() => appointments
-    .filter((appointment) => localDateKey(new Date(appointment.startAt)) === todayInputValue())
     .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
     .map((appointment) => ({
       ...appointment,
+      date: localDateKey(new Date(appointment.startAt)),
       time: displayTime(appointment.startAt),
       customer: appointment.customerName,
       service: serviceMap[appointment.serviceId]?.name || appointment.serviceId,
       staff: staffMap[appointment.staffId]?.name || appointment.staffId,
       displayStatus: statusMap[appointment.status] || "Booked",
     })), [appointments, serviceMap, staffMap]);
+  const todayAppointmentRows = useMemo(() => appointmentRows.filter((row) => row.date === todayInputValue()), [appointmentRows]);
+  const futureAppointmentRows = useMemo(() => appointmentRows.filter((row) => row.date > todayInputValue()), [appointmentRows]);
 
   const recentActivity = useMemo(() => {
     const bookingActivity = appointments.map((appointment) => ({
@@ -292,7 +296,7 @@ export default function Dashboard() {
       </Dialog>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Today's Appointments" value={metrics.appointmentsToday} icon={<Calendar className="h-5 w-5" />} subtitle={`${appointmentRows.length} shown in schedule`} />
+        <StatCard title="Today's Appointments" value={metrics.appointmentsToday} icon={<Calendar className="h-5 w-5" />} subtitle={`${todayAppointmentRows.length} shown in schedule`} />
         <StatCard title="Today's Revenue" value={money(metrics.revenueToday)} icon={<DollarSign className="h-5 w-5" />} subtitle="Paid invoice revenue" />
         <StatCard title="Total Customers" value={metrics.totalCustomers} icon={<Users className="h-5 w-5" />} subtitle="Active customer records" />
         <StatCard title="Monthly Revenue" value={money(monthlyRevenue)} icon={<TrendingUp className="h-5 w-5" />} subtitle={`${invoiceCount} paid invoices`} />
@@ -342,11 +346,61 @@ export default function Dashboard() {
             { key: "service", label: "Service" },
             { key: "staff", label: "Staff" },
             { key: "status", label: "Status", render: (row) => <StatusBadge status={row.displayStatus} /> },
+            { key: "details", label: "", render: (row) => <Button size="sm" variant="outline" onClick={() => setSelectedBooking(row)}><Eye className="mr-2 h-3.5 w-3.5" />Details</Button> },
           ]}
-          data={appointmentRows}
+          data={todayAppointmentRows}
           emptyMessage="No appointments scheduled for today"
         />
       </div>
+
+      <div className="mt-6 rounded-xl border border-border bg-card shadow-card">
+        <div className="border-b border-border p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Calendar className="h-4 w-4" />
+            Future Bookings
+          </h3>
+        </div>
+        <DataTable
+          columns={[
+            { key: "date", label: "Date" },
+            { key: "time", label: "Time" },
+            { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer as string}</span> },
+            { key: "service", label: "Service" },
+            { key: "staff", label: "Staff" },
+            { key: "status", label: "Status", render: (row) => <StatusBadge status={row.displayStatus} /> },
+            { key: "details", label: "", render: (row) => <Button size="sm" variant="outline" onClick={() => setSelectedBooking(row)}><Eye className="mr-2 h-3.5 w-3.5" />Details</Button> },
+          ]}
+          data={futureAppointmentRows}
+          emptyMessage="No future bookings scheduled"
+        />
+      </div>
+
+      <Dialog open={Boolean(selectedBooking)} onOpenChange={(open) => !open && setSelectedBooking(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Booking Details</DialogTitle>
+            <DialogDescription>Full booking record from the live appointment API.</DialogDescription>
+          </DialogHeader>
+          {selectedBooking && (
+            <div className="grid gap-3 text-sm">
+              {[
+                ["Customer", selectedBooking.customer],
+                ["Email", selectedBooking.customerEmail || "Not added"],
+                ["Service", selectedBooking.service],
+                ["Staff", selectedBooking.staff],
+                ["Date", selectedBooking.date],
+                ["Time", selectedBooking.time],
+                ["Status", selectedBooking.status],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                  <span className="text-muted-foreground">{String(label)}</span>
+                  <span className="font-medium text-foreground">{String(value || "-")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

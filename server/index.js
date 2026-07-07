@@ -1,13 +1,20 @@
 import cors from "cors";
 import express from "express";
+import fs from "fs";
 import http from "http";
+import path from "path";
 import { Server } from "socket.io";
 import { createClient } from "@supabase/supabase-js";
+import { fileURLToPath } from "url";
 
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 4000;
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dataDir = process.env.DATA_DIR || path.join(__dirname, "data");
+const dataFile = path.join(dataDir, "demo-state.json");
 const businessTimeZone = process.env.BUSINESS_TIMEZONE || "Asia/Karachi";
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseKey =
@@ -54,7 +61,7 @@ const services = [
   { id: "svc-bridal", name: "Bridal Preview", category: "Makeup", durationMinutes: 90, price: 18000, description: "Luxury bridal consultation and makeup trial.", imageUrl: "/Hero_sec.png", active: true },
 ];
 
-const staff = [
+let staff = [
   { id: "stf-sara", name: "Sara Ahmed", title: "Creative Director", specialties: ["Hair", "Color"], commissionRate: 15, baseSalary: 65000, status: "online", credentialEmail: "sara.ahmed@flourish.local", activePassword: "staff123", passwordUpdatedAt: new Date().toISOString(), bio: "Editorial cuts, soft color, and quiet luxury finishes." },
   { id: "stf-nadia", name: "Nadia Hussain", title: "Skin & Makeup Artist", specialties: ["Skin", "Makeup"], commissionRate: 12, baseSalary: 52000, status: "online", credentialEmail: "nadia.hussain@flourish.local", activePassword: "Nadia123", passwordUpdatedAt: new Date().toISOString(), bio: "Glow-focused facials and camera-ready makeup." },
   { id: "stf-hina", name: "Hina Rashid", title: "Nail & Detail Specialist", specialties: ["Hair", "Skin", "Makeup"], commissionRate: 10, baseSalary: 45000, status: "online", credentialEmail: "hina.rashid@flourish.local", activePassword: "Hina1234", passwordUpdatedAt: new Date().toISOString(), bio: "Detail-led treatments with calm, precise timing." },
@@ -127,6 +134,32 @@ const state = {
     },
   ],
 };
+
+function loadPersistedDemoData() {
+  try {
+    if (!fs.existsSync(dataFile)) return;
+    const persisted = JSON.parse(fs.readFileSync(dataFile, "utf8"));
+    if (Array.isArray(persisted.staff)) staff = persisted.staff;
+    if (persisted.state && typeof persisted.state === "object") {
+      for (const key of ["tenant", "appointments", "holds", "waitlist", "attendance", "customers", "invoices", "leaveRequests", "payroll", "payrollAdjustments", "expenses"]) {
+        if (persisted.state[key] !== undefined) state[key] = persisted.state[key];
+      }
+    }
+  } catch (error) {
+    console.warn("Could not load persisted demo data; using defaults.", error);
+  }
+}
+
+function savePersistedDemoData() {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(dataFile, JSON.stringify({ staff, state, savedAt: new Date().toISOString() }, null, 2));
+  } catch (error) {
+    console.warn("Could not persist demo data.", error);
+  }
+}
+
+loadPersistedDemoData();
 
 const plans = [
   { id: "starter", name: "Starter", priceMonthly: 29, seats: 3, locations: 1, features: ["Bookings", "Customers", "Invoices"] },
@@ -681,6 +714,7 @@ app.post("/api/services", requireRole("admin"), (req, res) => {
     ...payload,
   };
   services.push(service);
+  savePersistedDemoData();
   res.status(201).json(service);
 });
 app.patch("/api/services/:id", requireRole("admin"), (req, res) => {
@@ -694,6 +728,7 @@ app.patch("/api/services/:id", requireRole("admin"), (req, res) => {
   if (!nextService.name) return res.status(400).json({ error: "Service name is required" });
 
   services[index] = nextService;
+  savePersistedDemoData();
   res.json(nextService);
 });
 app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
@@ -701,6 +736,7 @@ app.delete("/api/services/:id", requireRole("admin"), (req, res) => {
   if (index === -1) return res.status(404).json({ error: "Service not found" });
 
   const [removed] = services.splice(index, 1);
+  savePersistedDemoData();
   res.json(removed);
 });
 app.get("/api/staff", (req, res) => {
@@ -739,6 +775,7 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
     passwordUpdatedAt: new Date().toISOString(),
   };
   staff.push(member);
+  savePersistedDemoData();
   io.emit("staff:update", member);
   res.status(201).json({ ...member, credentials: { email: member.credentialEmail, password: temporaryPassword } });
 });
@@ -757,6 +794,7 @@ app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
     member.passwordUpdatedAt = new Date().toISOString();
   }
   staff[index] = member;
+  savePersistedDemoData();
   io.emit("staff:update", member);
   res.json(member);
 });
@@ -770,6 +808,7 @@ app.patch("/api/staff/me/password", requireRole("staff", "admin"), (req, res) =>
   if (nextPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
   staffMember.activePassword = nextPassword;
   staffMember.passwordUpdatedAt = new Date().toISOString();
+  savePersistedDemoData();
   io.emit("staff:update", staffMember);
   res.json({ staffId: staffMember.id, email: staffMember.credentialEmail, passwordUpdatedAt: staffMember.passwordUpdatedAt });
 });
@@ -782,6 +821,7 @@ app.patch("/api/staff/:id/password", requireRole("admin"), (req, res) => {
   if (nextPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
   member.activePassword = nextPassword;
   member.passwordUpdatedAt = new Date().toISOString();
+  savePersistedDemoData();
   io.emit("staff:update", member);
   res.json({ staffId: member.id, email: member.credentialEmail, password: member.activePassword, passwordUpdatedAt: member.passwordUpdatedAt });
 });
@@ -793,6 +833,7 @@ app.delete("/api/staff/:id", requireRole("admin"), (req, res) => {
   const [removed] = staff.splice(index, 1);
   state.appointments = state.appointments.filter((appointment) => appointment.staffId !== removed.id);
   state.attendance = state.attendance.filter((entry) => entry.staffId !== removed.id);
+  savePersistedDemoData();
   io.emit("staff:update", removed);
   io.emit("appointments:update", state.appointments);
   res.json(removed);
@@ -845,6 +886,7 @@ app.post("/api/holds", (req, res) => {
     status: "active",
   };
   state.holds.push(hold);
+  savePersistedDemoData();
   emitSchedule(staffId, date);
   res.status(201).json(hold);
 });
@@ -883,6 +925,7 @@ app.post("/api/bookings", (req, res) => {
     phone: customerPhone,
   });
   if (hold) hold.status = "converted";
+  savePersistedDemoData();
   emitSchedule(staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
   io.emit("customers:update", state.customers);
@@ -902,6 +945,7 @@ app.post("/api/waitlist", (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.waitlist.push(entry);
+  savePersistedDemoData();
   io.emit("waitlist:update", entry);
   res.status(201).json(entry);
 });
@@ -932,8 +976,11 @@ app.post("/api/appointments", requireRole("admin"), (req, res) => {
     notes: req.body.notes,
   });
   state.appointments.unshift(appointment);
+  upsertCustomer({ name: appointment.customerName, email: appointment.customerEmail, phone: appointment.customerPhone });
+  savePersistedDemoData();
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
+  io.emit("customers:update", state.customers);
   res.status(201).json(appointment);
 });
 
@@ -943,12 +990,14 @@ app.patch("/api/appointments/:id/status", requireRole("admin", "staff"), (req, r
   if (roleFromRequest(req) === "staff" && appointment.staffId !== staffFromRequest(req)) {
     return res.status(403).json({ error: "Staff can only update their own appointments" });
   }
-  const allowed = ["arrived", "in_progress", "completed", "no_show"];
+  const allowed = ["booked", "confirmed", "arrived", "in_progress", "completed", "no_show"];
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
   appointment.status = req.body.status;
   appointment.updatedAt = new Date().toISOString();
+  savePersistedDemoData();
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
+  io.emit("customers:update", localCustomerRows());
   res.json(appointment);
 });
 
@@ -961,8 +1010,10 @@ app.patch("/api/appointments/:id/cancel", (req, res) => {
   appointment.status = "cancelled";
   appointment.updatedAt = new Date().toISOString();
   notifyWaitlist(appointment);
+  savePersistedDemoData();
   emitSchedule(appointment.staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
+  io.emit("customers:update", localCustomerRows());
   res.json({ appointment, waitlistNotification: "Next waitlisted customer has been notified if one exists." });
 });
 
@@ -999,6 +1050,7 @@ app.patch("/api/staff/:id/status", requireRole("admin"), (req, res) => {
   const allowed = ["online", "offline_today", "on_leave"];
   if (!allowed.includes(req.body.status)) return res.status(422).json({ error: "Invalid staff status" });
   staffMember.status = req.body.status;
+  savePersistedDemoData();
   io.emit("staff:update", staffMember);
   res.json(staffMember);
 });
@@ -1031,6 +1083,7 @@ app.post("/api/staff/me/leave", requireRole("staff", "admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.leaveRequests.unshift(request);
+  savePersistedDemoData();
   io.emit("leave:update", request);
   res.status(201).json(request);
 });
@@ -1094,6 +1147,7 @@ app.post("/api/admin/attendance", requireRole("admin"), (req, res) => {
   entry.clockOutAt = req.body.clockOutAt || null;
   entry.markedBy = "admin";
   entry.updatedAt = new Date().toISOString();
+  savePersistedDemoData();
   io.emit("attendance:update", attendanceSummary(date));
   res.status(201).json(entry);
 });
@@ -1124,6 +1178,7 @@ app.patch("/api/admin/leave-requests/:id", requireRole("admin"), (req, res) => {
       cursor.setDate(cursor.getDate() + 1);
     }
   }
+  savePersistedDemoData();
   io.emit("leave:update", request);
   io.emit("attendance:update", attendanceSummary(request.fromDate));
   res.json(request);
@@ -1145,7 +1200,16 @@ app.get("/api/metrics", requireRole("admin"), (_req, res) => {
 app.get("/api/customers", requireRole("admin"), async (_req, res) => {
   try {
     const supabaseRows = await fetchSupabaseCustomerRows();
-    if (supabaseRows) return res.json(supabaseRows);
+    if (supabaseRows) {
+      const seen = new Set();
+      const merged = [...supabaseRows, ...localCustomerRows()].filter((customer) => {
+        const key = String(customer.email || customer.name || customer.id).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return res.json(merged);
+    }
     return res.json(localCustomerRows());
   } catch (error) {
     console.error("Could not fetch Supabase customers", error);
@@ -1164,6 +1228,7 @@ app.post("/api/customers", requireRole("admin"), (req, res) => {
     phone: req.body.phone,
     notes: req.body.notes,
   });
+  savePersistedDemoData();
   io.emit("customers:update", state.customers);
   res.status(created ? 201 : 200).json(normalizeCustomerRecord({ ...customer, full_name: customer.name, source: "local" }));
 });
@@ -1191,6 +1256,7 @@ app.patch("/api/payroll/:staffId/status", requireRole("admin"), (req, res) => {
   record.paid = Boolean(req.body.paid);
   record.paidAt = record.paid ? new Date().toISOString() : null;
   record.updatedAt = new Date().toISOString();
+  savePersistedDemoData();
   io.emit("payroll:update", payrollRows(month));
   res.json(payrollRows(month).find((row) => row.staffId === staffMember.id));
 });
@@ -1210,6 +1276,7 @@ app.post("/api/payroll/adjustments", requireRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.payrollAdjustments.unshift(adjustment);
+  savePersistedDemoData();
   io.emit("payroll:update", payrollRows(adjustment.month));
   res.status(201).json(adjustment);
 });
@@ -1217,6 +1284,7 @@ app.delete("/api/payroll/adjustments/:id", requireRole("admin"), (req, res) => {
   const index = state.payrollAdjustments.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Adjustment not found" });
   const [removed] = state.payrollAdjustments.splice(index, 1);
+  savePersistedDemoData();
   io.emit("payroll:update", payrollRows(removed.month));
   res.json(removed);
 });
@@ -1237,6 +1305,7 @@ app.post("/api/expenses", requireRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.expenses.unshift(expense);
+  savePersistedDemoData();
   io.emit("expenses:update", state.expenses);
   io.emit("financials:update", financialSummary(monthKey(expense.date)));
   res.status(201).json(expense);
@@ -1245,6 +1314,7 @@ app.delete("/api/expenses/:id", requireRole("admin"), (req, res) => {
   const index = state.expenses.findIndex((expense) => expense.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Expense not found" });
   const [removed] = state.expenses.splice(index, 1);
+  savePersistedDemoData();
   io.emit("expenses:update", state.expenses);
   io.emit("financials:update", financialSummary(monthKey(removed.date)));
   res.json(removed);
@@ -1268,6 +1338,7 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   };
   state.invoices.unshift(invoice);
   upsertCustomer({ name: invoice.customer, email: invoice.customerEmail, phone: invoice.customerPhone });
+  savePersistedDemoData();
   io.emit("invoices:update", state.invoices);
   io.emit("customers:update", localCustomerRows());
   io.emit("staff:commission:update", invoiceCommissions(monthKey(invoice.date)));

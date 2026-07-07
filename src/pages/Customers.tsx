@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { Plus, RefreshCw, Search, Star, Users } from "lucide-react";
+import { CalendarDays, Clock, Plus, RefreshCw, Search, Star, Users } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import FormDialog from "@/components/FormDialog";
@@ -113,6 +113,9 @@ export default function Customers() {
       String(customer.phone || "").includes(query)
     );
   }, [customers, search]);
+  const totalBookings = useMemo(() => customers.reduce((sum, customer) => sum + Number(customer.totalBookings || 0), 0), [customers]);
+  const totalVisits = useMemo(() => customers.reduce((sum, customer) => sum + Number(customer.visits || 0), 0), [customers]);
+  const recentlyVisited = useMemo(() => customers.filter((customer) => customer.lastVisitedDate).length, [customers]);
 
   const addCustomer = async (data: Record<string, string>) => {
     try {
@@ -161,6 +164,25 @@ export default function Customers() {
         onSubmit={addCustomer}
         submitLabel="Add Customer"
       />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[
+          { label: "Customer Profiles", value: customers.length, icon: Users, helper: "live CRM records" },
+          { label: "Total Bookings", value: totalBookings, icon: CalendarDays, helper: "all appointment statuses" },
+          { label: "Completed Visits", value: totalVisits, icon: Clock, helper: `${recentlyVisited} customers visited at least once` },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <stat.icon className="h-4 w-4" />
+              </span>
+            </div>
+            <p className="font-editorial text-4xl text-foreground">{stat.value}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{stat.helper}</p>
+          </div>
+        ))}
+      </div>
 
       <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-center">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, SlidersHorizontal } from "lucide-react";
+import { CalendarClock, Eye, Plus, Search, SlidersHorizontal } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import PageHeader from "@/components/PageHeader";
 import DataTable, { StatusBadge, AppointmentStatus } from "@/components/DataTable";
@@ -26,11 +26,19 @@ type Appointment = {
 };
 
 const statusMap: Record<string, AppointmentStatus> = {
-  booked: "Booked", arrived: "Booked", in_progress: "Booked",
+  booked: "Booked", confirmed: "Booked", arrived: "Booked", in_progress: "Booked",
   completed: "Completed", cancelled: "Cancelled", no_show: "Cancelled",
 };
 
 const STATUS_FILTERS = ["All", "Booked", "Completed", "Cancelled"] as const;
+const STATUS_OPTIONS = [
+  { value: "booked", label: "Booked" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "arrived", label: "Arrived" },
+  { value: "in_progress", label: "In progress" },
+  { value: "completed", label: "Completed" },
+  { value: "no_show", label: "No show" },
+] as const;
 
 export default function Appointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -39,6 +47,8 @@ export default function Appointments() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showAdd, setShowAdd] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Record<string, unknown> | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customerName: "", customerEmail: "",
     serviceId: "", staffId: "",
@@ -72,7 +82,7 @@ export default function Appointments() {
 
   const rows = appointments.map((a) => ({
     ...a,
-    date: a.startAt.slice(0, 10),
+    date: localDateKey(new Date(a.startAt)),
     time: new Date(a.startAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
     customer: a.customerName,
     service: serviceMap[a.serviceId]?.name || a.serviceId,
@@ -104,6 +114,60 @@ export default function Appointments() {
     }
   };
 
+  const updateStatus = async (appointmentId: string, status: string) => {
+    setStatusUpdatingId(appointmentId);
+    try {
+      const res = await fetch(`${API_URL}/api/appointments/${appointmentId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-role": "admin" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not update appointment status");
+      toast.success("Appointment status updated");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update appointment status");
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
+  const todayRows = filtered.filter((row) => row.date === localDateKey());
+  const futureRows = filtered.filter((row) => row.date > localDateKey());
+  const olderRows = filtered.filter((row) => row.date < localDateKey());
+
+  const tableColumns = [
+    { key: "date", label: "Date" },
+    { key: "time", label: "Time" },
+    { key: "customer", label: "Customer", render: (row: Record<string, unknown>) => <span className="font-medium">{row.customer as string}</span> },
+    { key: "customerEmail", label: "Email", render: (row: Record<string, unknown>) => <span className="text-muted-foreground">{row.customerEmail as string}</span> },
+    { key: "service", label: "Service" },
+    { key: "staffName", label: "Staff" },
+    { key: "status", label: "Status", render: (row: Record<string, unknown>) => <StatusBadge status={row.displayStatus as AppointmentStatus} /> },
+    {
+      key: "changeStatus",
+      label: "Change Status",
+      render: (row: Record<string, unknown>) => (
+        <Select value={row.status as string} onValueChange={(value) => updateStatus(row.id as string, value)} disabled={statusUpdatingId === row.id}>
+          <SelectTrigger className="h-9 min-w-[140px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      ),
+    },
+    {
+      key: "details",
+      label: "",
+      render: (row: Record<string, unknown>) => (
+        <Button size="sm" variant="outline" onClick={() => setSelectedAppointment(row)}>
+          <Eye className="mr-2 h-3.5 w-3.5" />Details
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div>
       <PageHeader
@@ -119,7 +183,7 @@ export default function Appointments() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground stroke-[1.5]" />
             <Input
-              placeholder="Search by name or email…"
+              placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-11"
@@ -150,19 +214,27 @@ export default function Appointments() {
           </div>
         </div>
 
-        <DataTable
-          columns={[
-            { key: "date", label: "Date" },
-            { key: "time", label: "Time" },
-            { key: "customer", label: "Customer", render: (row) => <span className="font-medium">{row.customer as string}</span> },
-            { key: "customerEmail", label: "Email", render: (row) => <span className="text-muted-foreground">{row.customerEmail as string}</span> },
-            { key: "service", label: "Service" },
-            { key: "staffName", label: "Staff" },
-            { key: "status", label: "Status", render: (row) => <StatusBadge status={row.displayStatus as AppointmentStatus} /> },
-          ]}
-          data={filtered}
-          emptyMessage="No appointments found"
-        />
+        <div className="space-y-8 p-4 sm:p-5">
+          {[
+            { title: "Today's Bookings", subtitle: "Current date appointments", rows: todayRows },
+            { title: "Future Bookings", subtitle: "Upcoming appointments after today", rows: futureRows },
+            { title: "Older Bookings", subtitle: "Past appointments kept for history", rows: olderRows },
+          ].map((section) => (
+            <div key={section.title} className="overflow-hidden rounded-2xl border border-border/70">
+              <div className="flex items-center justify-between border-b border-border bg-muted/35 px-5 py-4">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <CalendarClock className="h-4 w-4" />
+                    {section.title}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{section.subtitle}</p>
+                </div>
+                <span className="text-xs text-muted-foreground">{section.rows.length} bookings</span>
+              </div>
+              <DataTable columns={tableColumns} data={section.rows} emptyMessage={`No ${section.title.toLowerCase()}`} />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* New Appointment Dialog */}
@@ -209,6 +281,32 @@ export default function Appointments() {
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
             <Button onClick={createAppointment}>Book Appointment</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedAppointment)} onOpenChange={(open) => !open && setSelectedAppointment(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Booking Details</DialogTitle>
+          </DialogHeader>
+          {selectedAppointment && (
+            <div className="grid gap-3 text-sm">
+              {[
+                ["Customer", selectedAppointment.customer],
+                ["Email", selectedAppointment.customerEmail || "Not added"],
+                ["Service", selectedAppointment.service],
+                ["Staff", selectedAppointment.staffName],
+                ["Date", selectedAppointment.date],
+                ["Time", selectedAppointment.time],
+                ["Status", selectedAppointment.status],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                  <span className="text-muted-foreground">{String(label)}</span>
+                  <span className="font-medium text-foreground">{String(value || "-")}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
