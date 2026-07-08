@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { CalendarDays, Clock, Plus, RefreshCw, Search, Star, Users } from "lucide-react";
+import { CalendarDays, Clock, Pencil, Plus, RefreshCw, Search, Star, Trash2, Users } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import FormDialog from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { toast } from "sonner";
@@ -59,6 +61,9 @@ export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState<Customer | null>(null);
+  const [customerForm, setCustomerForm] = useState({ name: "", email: "", phone: "", notes: "", pin: "" });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -133,6 +138,60 @@ export default function Customers() {
     }
   };
 
+  const openEdit = (customer: Customer) => {
+    setEditing(customer);
+    setCustomerForm({
+      name: customer.name || "",
+      email: customer.email || "",
+      phone: customer.phone || "",
+      notes: customer.notes || "",
+      pin: "",
+    });
+  };
+
+  const saveCustomer = async () => {
+    if (!editing) return;
+    try {
+      const res = await fetch(`${API_URL}/api/customers/${encodeURIComponent(String(editing.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-role": "admin", "x-pin": customerForm.pin },
+        body: JSON.stringify(customerForm),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Could not update customer");
+      toast.success(`${body.name || customerForm.name} updated.`);
+      setEditing(null);
+      setCustomerForm({ name: "", email: "", phone: "", notes: "", pin: "" });
+      await loadCustomers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update customer");
+    }
+  };
+
+  const deleteCustomer = async () => {
+    if (!deleting) return;
+    try {
+      const res = await fetch(`${API_URL}/api/customers/${encodeURIComponent(String(deleting.id))}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "x-role": "admin", "x-pin": customerForm.pin },
+        body: JSON.stringify({
+          pin: customerForm.pin,
+          name: deleting.name,
+          email: deleting.email,
+          phone: deleting.phone,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Could not delete customer");
+      toast.success(`${deleting.name} deleted.`);
+      setDeleting(null);
+      setCustomerForm({ name: "", email: "", phone: "", notes: "", pin: "" });
+      await loadCustomers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete customer");
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -164,6 +223,68 @@ export default function Customers() {
         onSubmit={addCustomer}
         submitLabel="Add Customer"
       />
+
+      <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Customer</DialogTitle>
+            <DialogDescription>Update customer contact details. Security PIN is required.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="customer-name" className="text-sm font-medium">Full Name</label>
+              <Input id="customer-name" value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label htmlFor="customer-email" className="text-sm font-medium">Email</label>
+                <Input id="customer-email" type="email" value={customerForm.email} onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="customer-phone" className="text-sm font-medium">Phone</label>
+                <Input id="customer-phone" type="tel" value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="customer-notes" className="text-sm font-medium">Notes</label>
+              <Textarea id="customer-notes" value={customerForm.notes} onChange={(e) => setCustomerForm({ ...customerForm, notes: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="customer-pin" className="text-sm font-medium">Security PIN</label>
+              <Input id="customer-pin" type="password" placeholder="1234" value={customerForm.pin} onChange={(e) => setCustomerForm({ ...customerForm, pin: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={saveCustomer}>Save Customer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Customer</DialogTitle>
+            <DialogDescription>
+              Enter security PIN to delete {deleting?.name}. This hides the CRM record from the admin customer list.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="delete-customer-pin" className="text-sm font-medium">Security PIN</label>
+            <Input
+              id="delete-customer-pin"
+              type="password"
+              placeholder="1234"
+              value={customerForm.pin}
+              onChange={(e) => setCustomerForm({ ...customerForm, pin: e.target.value })}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={deleteCustomer}>Delete Customer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
@@ -216,6 +337,7 @@ export default function Customers() {
                     <div>
                       <p className="font-medium text-foreground leading-none">{row.name as string}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">{(row.email as string) || "No email"}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{(row.phone as string) || "No phone"}</p>
                     </div>
                   </div>
                 ),
@@ -245,6 +367,28 @@ export default function Customers() {
                   <span className="text-muted-foreground text-xs max-w-[180px] truncate block">
                     {(row.notes as string) || "-"}
                   </span>
+                ),
+              },
+              {
+                key: "actions", label: "",
+                render: (row) => (
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon-sm" onClick={() => openEdit(row as unknown as Customer)} aria-label={`Edit ${row.name}`}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        setDeleting(row as unknown as Customer);
+                        setCustomerForm({ name: "", email: "", phone: "", notes: "", pin: "" });
+                      }}
+                      aria-label={`Delete ${row.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 ),
               },
             ]}

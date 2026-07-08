@@ -17,7 +17,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 - Staff dashboard for assigned appointments, service workflow updates, attendance percentage, salary status, commission, deductions, and payable salary
 - Realtime appointment booking with search, status filtering, backend overlap prevention, and Socket.io updates
 - Customer CRM with registered customer profiles, total bookings, completed visit counts, and last visited dates
-- Staff management with salary, commission rate, attendance percentage, payable salary, leaderboard views, and PIN-protected add/edit/delete actions
+- Staff management with salary, commission rate, personal alert email, generated login credentials, attendance percentage, payable salary, leaderboard views, and PIN-protected add/edit/delete actions
 - Service menu CRUD with category filters
 - Service-linked billing and invoice generation with staff assignment, quantities, custom "other service" line items, optional discounts, downloadable receipts, and automatic commission calculation
 - Payroll module with month-wise base salary, commission, bonuses, deductions/penalties, paid/unpaid status, total payable, and profit after payroll
@@ -28,7 +28,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 - Express API for tenant, metrics, appointments, customers, staff, attendance, leave requests, invoices, expenses, payroll, financials, plans, and subscription checkout stubs
 - Advanced scheduling: 10:00 AM to 2:00 AM business day, dynamic service durations, 2-hour booking cutoff, 4-hour cancellation window, slot holds, waitlist, and backend overlap prevention
 - Socket.io realtime updates for schedules, appointments, attendance, leave requests, invoices, staff, and payroll
-- Internal notification alerts for admin/staff workflows plus transactional email stubs for booking and staff onboarding events
+- Internal notification alerts for admin/staff workflows plus transactional email stubs for booking reminders, staff onboarding credentials, and staff appointment assignments
 
 ## RBAC Route Map
 

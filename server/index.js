@@ -375,7 +375,7 @@ function dedupedAttendanceRows(staffId, month = monthKey()) {
 function normalizeStaffPayload(input, existing = {}) {
   const name = String(input.name ?? existing.name ?? "").trim();
   const domain = String(input.domain || "flourish.local").replace(/^@/, "").trim() || "flourish.local";
-  const credentialEmail = String(input.credentialEmail || existing.credentialEmail || staffEmailFromName(name, domain)).trim().toLowerCase();
+  const credentialEmail = String(existing.credentialEmail || staffEmailFromName(name, domain)).trim().toLowerCase();
   return {
     ...existing,
     name,
@@ -387,6 +387,7 @@ function normalizeStaffPayload(input, existing = {}) {
     baseSalary: Math.max(0, Number(input.baseSalary ?? existing.baseSalary ?? 0) || 0),
     status: input.status || existing.status || "online",
     credentialEmail,
+    personalEmail: String(input.personalEmail ?? existing.personalEmail ?? "").trim().toLowerCase(),
     phone: String(input.phone ?? existing.phone ?? "").trim(),
     activePassword: existing.activePassword,
     passwordUpdatedAt: existing.passwordUpdatedAt,
@@ -658,6 +659,7 @@ function upsertCustomer({ name, email = "", phone = "", notes = "" }) {
     customer.email = customer.email || normalizedEmail;
     customer.phone = customer.phone || phone;
     customer.notes = notes || customer.notes;
+    customer.deleted = false;
     customer.updatedAt = new Date().toISOString();
     void upsertSupabaseRecord("customers", customer);
     return { customer, created: false };
@@ -755,11 +757,60 @@ function normalizeCustomerRecord(record) {
 }
 
 function localCustomerRows() {
-  return state.customers.map((customer) => normalizeCustomerRecord({
-    ...customer,
-    full_name: customer.name,
-    source: "local",
-  }));
+  return state.customers
+    .filter((customer) => !customer.deleted)
+    .map((customer) => normalizeCustomerRecord({
+      ...customer,
+      full_name: customer.name,
+      source: "local",
+    }));
+}
+
+function customerKey(customer) {
+  return String(customer.email || customer.name || customer.id || "").trim().toLowerCase();
+}
+
+function customerTombstoneKeys() {
+  return new Set(
+    state.customers
+      .filter((customer) => customer.deleted)
+      .flatMap((customer) => [
+        customer.id && `id:${String(customer.id).toLowerCase()}`,
+        customer.email && `email:${String(customer.email).toLowerCase()}`,
+        customer.name && `name:${String(customer.name).toLowerCase()}`,
+      ].filter(Boolean))
+  );
+}
+
+function isCustomerDeleted(customer, tombstones = customerTombstoneKeys()) {
+  return tombstones.has(`id:${String(customer.id || "").toLowerCase()}`) ||
+    tombstones.has(`email:${String(customer.email || "").toLowerCase()}`) ||
+    tombstones.has(`name:${String(customer.name || "").toLowerCase()}`);
+}
+
+function mergeCustomerRows(rows = []) {
+  const tombstones = customerTombstoneKeys();
+  const merged = new Map();
+  for (const customer of rows) {
+    if (isCustomerDeleted(customer, tombstones)) continue;
+    const key = customerKey(customer);
+    if (!key) continue;
+    const existing = merged.get(key);
+    merged.set(key, existing ? {
+      ...existing,
+      ...customer,
+      name: existing.name || customer.name,
+      email: existing.email || customer.email,
+      phone: existing.phone || customer.phone,
+      notes: existing.notes || customer.notes,
+      totalBookings: Math.max(Number(existing.totalBookings || 0), Number(customer.totalBookings || 0)),
+      visits: Math.max(Number(existing.visits || 0), Number(customer.visits || 0)),
+      lastVisitedDate: [existing.lastVisitedDate, customer.lastVisitedDate].filter(Boolean).sort().at(-1) || "",
+      createdAt: existing.createdAt || customer.createdAt,
+      vip: Boolean(existing.vip || customer.vip),
+    } : customer);
+  }
+  return Array.from(merged.values());
 }
 
 async function safeSupabaseSelect(table, queryBuilder) {
@@ -1085,6 +1136,7 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
   const payload = normalizeStaffPayload(req.body);
   if (!payload.name) return res.status(400).json({ error: "Staff name is required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.credentialEmail)) return res.status(400).json({ error: "Valid staff email is required" });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.personalEmail)) return res.status(400).json({ error: "Valid personal email is required for staff alerts" });
   if (!String(payload.phone || "").replace(/\D/g, "").match(/^\d{7,15}$/)) return res.status(400).json({ error: "Valid staff phone number is required" });
   const temporaryPassword = generateTemporaryPassword();
   const member = {
@@ -1104,7 +1156,7 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
     data: { staffId: member.id },
   });
   sendTransactionalEmail({
-    to: member.credentialEmail,
+    to: member.personalEmail,
     subject: "Your Flourish Salon Pro staff account",
     body: `Welcome ${member.name}. Your login email is ${member.credentialEmail} and temporary password is ${temporaryPassword}.`,
     type: "staff-onboarding",
@@ -1120,6 +1172,7 @@ app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
   const member = normalizeStaffPayload(req.body, staff[index]);
   if (!member.name) return res.status(400).json({ error: "Staff name is required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(member.credentialEmail)) return res.status(400).json({ error: "Valid staff email is required" });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(member.personalEmail)) return res.status(400).json({ error: "Valid personal email is required for staff alerts" });
   if (!String(member.phone || "").replace(/\D/g, "").match(/^\d{7,15}$/)) return res.status(400).json({ error: "Valid staff phone number is required" });
   member.credentialEmail = uniqueStaffEmail(member.credentialEmail, member.id);
   if (req.body.overridePassword) {
@@ -1279,9 +1332,9 @@ app.post("/api/bookings", (req, res) => {
       data: { appointmentId: appointment.id },
     });
     sendTransactionalEmail({
-      to: staffMember.credentialEmail,
+      to: staffMember.personalEmail || staffMember.credentialEmail,
       subject: "New appointment assigned",
-      body: `${customerName} booked ${service.name} for ${date} at ${time}.`,
+      body: `${customerName} booked ${service.name} for ${date} at ${time}. Phone: ${customerPhone}. Email: ${customerEmail}.`,
       type: "booking-staff",
     });
   }
@@ -1581,14 +1634,7 @@ app.get("/api/customers", requireRole("admin"), async (_req, res) => {
   try {
     const supabaseRows = await fetchSupabaseCustomerRows();
     if (supabaseRows) {
-      const seen = new Set();
-      const merged = [...supabaseRows, ...localCustomerRows()].filter((customer) => {
-        const key = String(customer.email || customer.name || customer.id).toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      return res.json(merged);
+      return res.json(mergeCustomerRows([...localCustomerRows(), ...supabaseRows]));
     }
     return res.json(localCustomerRows());
   } catch (error) {
@@ -1610,6 +1656,74 @@ app.post("/api/customers", requireRole("admin"), (req, res) => {
   });
   io.emit("customers:update", state.customers);
   res.status(created ? 201 : 200).json(normalizeCustomerRecord({ ...customer, full_name: customer.name, source: "local" }));
+});
+
+app.patch("/api/customers/:id", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res, "customer changes")) return;
+  const id = String(req.params.id);
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Customer name is required" });
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const phone = String(req.body.phone || "").trim();
+  const notes = String(req.body.notes || "").trim();
+  const index = state.customers.findIndex((customer) =>
+    String(customer.id) === id ||
+    (email && String(customer.email || "").toLowerCase() === email)
+  );
+  const nowIso = new Date().toISOString();
+  const customer = index >= 0 ? {
+    ...state.customers[index],
+    name,
+    email,
+    phone,
+    notes,
+    deleted: false,
+    updatedAt: nowIso,
+  } : {
+    id,
+    name,
+    email,
+    phone,
+    notes,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+  if (index >= 0) state.customers[index] = customer;
+  else state.customers.unshift(customer);
+  void upsertSupabaseRecord("customers", customer);
+  io.emit("customers:update", localCustomerRows());
+  res.json(normalizeCustomerRecord({ ...customer, full_name: customer.name, source: "local" }));
+});
+
+app.delete("/api/customers/:id", requireRole("admin"), (req, res) => {
+  if (!verifyPin(req, res, "customer deletion")) return;
+  const id = String(req.params.id);
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const name = String(req.body.name || "").trim();
+  const index = state.customers.findIndex((customer) =>
+    String(customer.id) === id ||
+    (email && String(customer.email || "").toLowerCase() === email)
+  );
+  const nowIso = new Date().toISOString();
+  const tombstone = index >= 0 ? {
+    ...state.customers[index],
+    deleted: true,
+    updatedAt: nowIso,
+  } : {
+    id,
+    name,
+    email,
+    phone: String(req.body.phone || "").trim(),
+    notes: "",
+    deleted: true,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+  if (index >= 0) state.customers[index] = tombstone;
+  else state.customers.unshift(tombstone);
+  void upsertSupabaseRecord("customers", tombstone);
+  io.emit("customers:update", localCustomerRows());
+  res.json({ id, deleted: true });
 });
 app.get("/api/staff/commission", requireRole("admin", "staff"), (req, res) => {
   const month = req.query.month || monthKey();

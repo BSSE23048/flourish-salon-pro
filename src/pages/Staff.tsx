@@ -23,12 +23,12 @@ type StaffMember = {
   commissionRate: number; baseSalary: number; status: StaffAvailability;
   bio: string; monthlyRevenue: number; monthlyCommission: number;
   monthlyPayable: number; attendancePercentage: number;
-  credentialEmail?: string; phone?: string; activePassword?: string; passwordUpdatedAt?: string;
+  credentialEmail?: string; personalEmail?: string; phone?: string; activePassword?: string; passwordUpdatedAt?: string;
 };
 
 const emptyForm = {
   name: "", title: "", specialties: "Hair", commissionRate: "10",
-  baseSalary: "0", status: "online" as StaffAvailability, bio: "", pin: "", overridePassword: "", credentialEmail: "", phone: "",
+  baseSalary: "0", status: "online" as StaffAvailability, bio: "", pin: "", overridePassword: "", personalEmail: "", phone: "",
 };
 
 type GeneratedCredentials = { email: string; password: string; name: string } | null;
@@ -95,17 +95,17 @@ export default function Staff() {
       specialties: staff.specialties.join(", "),
       commissionRate: String(staff.commissionRate),
       baseSalary: String(staff.baseSalary || 0),
-      status: staff.status, bio: staff.bio || "", pin: "", overridePassword: "", credentialEmail: staff.credentialEmail || "", phone: staff.phone || "",
+      status: staff.status, bio: staff.bio || "", pin: "", overridePassword: "", personalEmail: staff.personalEmail || "", phone: staff.phone || "",
     } : emptyForm);
     setShowActivePassword(false);
     setFormOpen(true);
   };
 
   const saveStaff = async () => {
-    const email = form.credentialEmail.trim();
+    const email = form.personalEmail.trim();
     const phoneDigits = form.phone.replace(/\D/g, "");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      toast.error("Valid staff login email is required");
+      toast.error("Valid personal email is required for staff alerts");
       return;
     }
     if (phoneDigits.length < 7 || phoneDigits.length > 15) {
@@ -241,6 +241,7 @@ export default function Staff() {
             },
             { key: "baseSalary",         label: "Salary",     render: (row) => `Rs. ${Number(row.baseSalary || 0).toLocaleString()}` },
             { key: "credentialEmail",    label: "Login Email",render: (row) => <span className="font-mono text-xs">{row.credentialEmail as string}</span> },
+            { key: "personalEmail",      label: "Alert Email",render: (row) => <span className="font-mono text-xs text-muted-foreground">{(row.personalEmail as string) || "Not added"}</span> },
             { key: "phone",              label: "Phone",      render: (row) => <span className="font-mono text-xs text-muted-foreground">{(row.phone as string) || "Not added"}</span> },
             { key: "commissionRate",      label: "Rate",       render: (row) => `${row.commissionRate}%` },
             { key: "monthlyRevenue",      label: "Revenue",    render: (row) => `Rs. ${Number(row.monthlyRevenue).toLocaleString()}` },
@@ -347,14 +348,21 @@ export default function Staff() {
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label htmlFor="staff-email" className="text-sm font-medium">Login Email</label>
-                <Input id="staff-email" type="email" placeholder="ahmed@flourish.local" value={form.credentialEmail} onChange={(e) => setForm({ ...form, credentialEmail: e.target.value })} required />
+                <label htmlFor="staff-personal-email" className="text-sm font-medium">Personal Email for Alerts</label>
+                <Input id="staff-personal-email" type="email" placeholder="ahmed@gmail.com" value={form.personalEmail} onChange={(e) => setForm({ ...form, personalEmail: e.target.value })} required />
+                <p className="text-xs text-muted-foreground">Booking reminders and appointment details will be sent here.</p>
               </div>
               <div className="space-y-2">
                 <label htmlFor="staff-phone" className="text-sm font-medium">Phone Number</label>
                 <Input id="staff-phone" type="tel" placeholder="0300-1234567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
               </div>
             </div>
+            {!editing && (
+              <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Generated login email</p>
+                <p className="mt-1 text-sm text-muted-foreground">The system will create a secure login like <span className="font-mono text-foreground">firstname.lastname@flourish.local</span> after saving.</p>
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
