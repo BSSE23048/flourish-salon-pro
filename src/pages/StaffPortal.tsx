@@ -53,6 +53,7 @@ type AttendanceMonth = {
   rows: Array<{ id: string; date: string; status: string }>;
   leaveRequests: Array<{ id: string; fromDate: string; toDate: string; reason: string; status: string }>;
 };
+type StaffNotification = { id: string; title: string; message: string; read: boolean; createdAt: string; type: string };
 
 const statusOptions = ["arrived", "in_progress", "completed", "no_show"];
 const STAFF_ID_STORAGE_KEY = "flourish-staff-id";
@@ -92,6 +93,7 @@ export default function StaffPortal() {
   const [activeTab, setActiveTab] = useState("schedule");
   const [leave, setLeave] = useState({ fromDate: localDateKey(), toDate: localDateKey(), reason: "" });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [notifications, setNotifications] = useState<StaffNotification[]>([]);
   const profileStaffId = (profile as { id?: string } | null)?.id || "";
 
   const currentStaffId = useCallback(() => {
@@ -126,9 +128,19 @@ export default function StaffPortal() {
     await Promise.all([fetchSchedule(), fetchAttendance()]);
   }, [fetchAttendance, fetchSchedule]);
 
+  const fetchNotifications = useCallback(async () => {
+    const res = await fetch(`${API_URL}/api/notifications`, {
+      headers: { "x-role": "staff", "x-staff-id": currentStaffId() },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    setNotifications(Array.isArray(data) ? data : []);
+  }, [currentStaffId]);
+
   useEffect(() => {
     refresh().catch(() => toast.error(API_UNAVAILABLE_MESSAGE));
-  }, [refresh]);
+    fetchNotifications().catch(() => undefined);
+  }, [fetchNotifications, refresh]);
 
   useEffect(() => {
     const socket: Socket = io(API_URL, SOCKET_OPTIONS);
@@ -137,10 +149,16 @@ export default function StaffPortal() {
     socket.on("leave:update", refresh);
     socket.on("payroll:update", refresh);
     socket.on("staff:commission:update", refresh);
+    socket.emit?.("staff:join", { staffId: currentStaffId() });
+    socket.on("notification:new", (notification: StaffNotification) => {
+      setNotifications((current) => [notification, ...current]);
+      toast.info(notification.message);
+    });
+    socket.on("notification:update", fetchNotifications);
     return () => {
       socket.disconnect();
     };
-  }, [refresh]);
+  }, [currentStaffId, fetchNotifications, refresh]);
 
   const requestLeave = async () => {
     try {
@@ -259,6 +277,17 @@ export default function StaffPortal() {
           </CardContent>
         </Card>
       </section>
+
+      {notifications.filter((item) => !item.read).slice(0, 3).length > 0 && (
+        <section className="mb-6 space-y-2">
+          {notifications.filter((item) => !item.read).slice(0, 3).map((item) => (
+            <div key={item.id} className="rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm">
+              <p className="font-semibold text-foreground">{item.title}</p>
+              <p className="mt-1 text-muted-foreground">{item.message}</p>
+            </div>
+          ))}
+        </section>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid h-auto w-full grid-cols-2 rounded-xl md:w-[520px] md:grid-cols-4">

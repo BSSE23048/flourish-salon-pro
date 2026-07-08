@@ -6,7 +6,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 
 - **Frontend:** Next.js 16, React 18, TypeScript, Tailwind CSS, shadcn/Radix UI, Recharts
 - **Backend:** Express, CORS, JSON REST endpoints, Socket.io realtime events
-- **Auth/Data:** Supabase Auth plus Supabase-backed operational records for staff, services, appointments, attendance, invoices, payroll, expenses, settings, and customer profiles
+- **Auth/Data:** Supabase Auth plus Supabase-backed operational records for staff, services, appointments, attendance, invoices, payroll, expenses, settings, notifications, and customer profiles
 - **Tooling:** ESLint, Vitest, Testing Library, PostCSS
 
 ## Features
@@ -28,6 +28,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 - Express API for tenant, metrics, appointments, customers, staff, attendance, leave requests, invoices, expenses, payroll, financials, plans, and subscription checkout stubs
 - Advanced scheduling: 10:00 AM to 2:00 AM business day, dynamic service durations, 2-hour booking cutoff, 4-hour cancellation window, slot holds, waitlist, and backend overlap prevention
 - Socket.io realtime updates for schedules, appointments, attendance, leave requests, invoices, staff, and payroll
+- Internal notification alerts for admin/staff workflows plus transactional email stubs for booking and staff onboarding events
 
 ## RBAC Route Map
 
@@ -188,6 +189,8 @@ The Express backend lives in `server/index.js`.
 - `GET /api/tenant`
 - `GET /api/settings`
 - `PATCH /api/settings`
+- `GET /api/notifications`
+- `PATCH /api/notifications/:id/read`
 - `GET /api/services`
 - `POST /api/services`
 - `PATCH /api/services/:id`
@@ -243,6 +246,7 @@ Operational persistence tables:
 - `salon_payroll_adjustment_records`
 - `salon_expense_records`
 - `salon_settings_records`
+- `salon_notification_records`
 
 `GET /api/health` reports whether the backend is connected to these Supabase tables.
 

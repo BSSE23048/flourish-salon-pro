@@ -9,6 +9,11 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
 type LoginType = "admin" | "staff" | "client";
+const selectedPortalRole: Record<LoginType, "owner" | "staff" | "customer"> = {
+  admin: "owner",
+  staff: "staff",
+  client: "customer",
+};
 
 const loginRoles: { key: LoginType; label: string; icon: React.ElementType; description: string }[] = [
   { key: "admin", label: "Admin", icon: ShieldCheck, description: "Full management access" },
@@ -50,7 +55,7 @@ export default function Login() {
       if (error) toast.error(error);
       else toast.success("Account created! Please check your email to verify.");
     } else {
-      const { error, role } = await signIn(email, password);
+      const { error, role } = await signIn(email, password, selectedPortalRole[loginType]);
       setLoading(false);
       if (error) toast.error(error);
       else router.push(role === "staff" ? "/staff" : role === "customer" ? "/" : "/admin");
@@ -58,6 +63,10 @@ export default function Login() {
   };
 
   const signInWithGoogle = async () => {
+    if (loginType !== "client") {
+      toast.error("Google sign-in is available for the Client portal only.");
+      return;
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
@@ -231,7 +240,7 @@ export default function Login() {
             <div className="h-px flex-1 bg-border" />
           </div>
 
-          <Button type="button" variant="outline" className="h-12 w-full rounded-xl" onClick={signInWithGoogle}>
+          <Button type="button" variant="outline" className="h-12 w-full rounded-xl" onClick={signInWithGoogle} disabled={loginType !== "client"}>
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-bold text-primary">G</span>
             Sign in with Google
           </Button>

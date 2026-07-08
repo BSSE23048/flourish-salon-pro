@@ -23,12 +23,12 @@ type StaffMember = {
   commissionRate: number; baseSalary: number; status: StaffAvailability;
   bio: string; monthlyRevenue: number; monthlyCommission: number;
   monthlyPayable: number; attendancePercentage: number;
-  credentialEmail?: string; activePassword?: string; passwordUpdatedAt?: string;
+  credentialEmail?: string; phone?: string; activePassword?: string; passwordUpdatedAt?: string;
 };
 
 const emptyForm = {
   name: "", title: "", specialties: "Hair", commissionRate: "10",
-  baseSalary: "0", status: "online" as StaffAvailability, bio: "", pin: "", overridePassword: "",
+  baseSalary: "0", status: "online" as StaffAvailability, bio: "", pin: "", overridePassword: "", credentialEmail: "", phone: "",
 };
 
 type GeneratedCredentials = { email: string; password: string; name: string } | null;
@@ -95,13 +95,23 @@ export default function Staff() {
       specialties: staff.specialties.join(", "),
       commissionRate: String(staff.commissionRate),
       baseSalary: String(staff.baseSalary || 0),
-      status: staff.status, bio: staff.bio || "", pin: "", overridePassword: "",
+      status: staff.status, bio: staff.bio || "", pin: "", overridePassword: "", credentialEmail: staff.credentialEmail || "", phone: staff.phone || "",
     } : emptyForm);
     setShowActivePassword(false);
     setFormOpen(true);
   };
 
   const saveStaff = async () => {
+    const email = form.credentialEmail.trim();
+    const phoneDigits = form.phone.replace(/\D/g, "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("Valid staff login email is required");
+      return;
+    }
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      toast.error("Valid staff phone number is required");
+      return;
+    }
     setLoading(true);
     try {
       const method = editing ? "PATCH" : "POST";
@@ -231,6 +241,7 @@ export default function Staff() {
             },
             { key: "baseSalary",         label: "Salary",     render: (row) => `Rs. ${Number(row.baseSalary || 0).toLocaleString()}` },
             { key: "credentialEmail",    label: "Login Email",render: (row) => <span className="font-mono text-xs">{row.credentialEmail as string}</span> },
+            { key: "phone",              label: "Phone",      render: (row) => <span className="font-mono text-xs text-muted-foreground">{(row.phone as string) || "Not added"}</span> },
             { key: "commissionRate",      label: "Rate",       render: (row) => `${row.commissionRate}%` },
             { key: "monthlyRevenue",      label: "Revenue",    render: (row) => `Rs. ${Number(row.monthlyRevenue).toLocaleString()}` },
             { key: "monthlyCommission",   label: "Commission", render: (row) => <span className="font-semibold text-primary">Rs. {Number(row.monthlyCommission).toLocaleString()}</span> },
@@ -333,6 +344,16 @@ export default function Staff() {
             <div className="space-y-2">
               <label htmlFor="staff-specialties" className="text-sm font-medium">Specialties</label>
               <Input id="staff-specialties" placeholder="Hair, Nails, Makeup (comma separated)" value={form.specialties} onChange={(e) => setForm({ ...form, specialties: e.target.value })} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label htmlFor="staff-email" className="text-sm font-medium">Login Email</label>
+                <Input id="staff-email" type="email" placeholder="ahmed@flourish.local" value={form.credentialEmail} onChange={(e) => setForm({ ...form, credentialEmail: e.target.value })} required />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="staff-phone" className="text-sm font-medium">Phone Number</label>
+                <Input id="staff-phone" type="tel" placeholder="0300-1234567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">

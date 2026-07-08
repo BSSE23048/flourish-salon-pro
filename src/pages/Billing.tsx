@@ -14,6 +14,7 @@ import { toast } from "sonner";
 
 type Service = { id: string; name: string; price: number };
 type Staff = { id: string; name: string };
+type Customer = { id: string | number; name: string; email?: string; phone?: string };
 type InvoiceItem = { serviceId: string; name: string; staffId: string; quantity: number; unitPrice: number; total: number; custom: boolean };
 type Invoice = { id: string; date: string; customer: string; customerEmail?: string; customerPhone?: string; items: InvoiceItem[]; subtotal: number; discount: number; total: number; payment: string; status: string };
 
@@ -117,6 +118,7 @@ export default function Billing() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [customer, setCustomer] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
@@ -134,15 +136,17 @@ export default function Billing() {
   const total = Math.max(0, subtotal - discountAmount);
 
   const loadData = useCallback(async () => {
-    const [invoiceRes, serviceRes, staffRes] = await Promise.all([
+    const [invoiceRes, serviceRes, staffRes, customerRes] = await Promise.all([
       fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
       fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
       fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
+      fetch(`${API_URL}/api/customers`, { headers: { "x-role": "admin" } }),
     ]);
-    const [invoiceData, serviceData, staffData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json()]);
+    const [invoiceData, serviceData, staffData, customerData] = await Promise.all([invoiceRes.json(), serviceRes.json(), staffRes.json(), customerRes.json()]);
     setInvoices(invoiceData);
     setServices(serviceData);
     setStaff(staffData);
+    setCustomers(Array.isArray(customerData) ? customerData : []);
   }, []);
 
   useEffect(() => {
@@ -226,6 +230,16 @@ export default function Billing() {
     }
   };
 
+  const handleCustomerChange = (value: string) => {
+    setCustomer(value);
+    const existing = customers.find((item) => item.name.toLowerCase() === value.trim().toLowerCase() || item.email?.toLowerCase() === value.trim().toLowerCase());
+    if (existing) {
+      setCustomer(existing.name);
+      setCustomerEmail(existing.email || "");
+      setCustomerPhone(existing.phone || "");
+    }
+  };
+
   const deleteInvoice = async () => {
     if (!deleteTarget) return;
     try {
@@ -305,7 +319,14 @@ export default function Billing() {
             <DialogDescription>Build the invoice from the services the client actually received at the counter.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-3">
-            <Input placeholder="Customer name" value={customer} onChange={(event) => setCustomer(event.target.value)} />
+            <div>
+              <Input list="billing-customers" placeholder="Search or type customer name" value={customer} onChange={(event) => handleCustomerChange(event.target.value)} />
+              <datalist id="billing-customers">
+                {customers.map((item) => (
+                  <option key={String(item.id)} value={item.name}>{item.email || item.phone || "Existing customer"}</option>
+                ))}
+              </datalist>
+            </div>
             <Input placeholder="Email (optional)" value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} />
             <Input placeholder="Phone (optional)" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} />
           </div>

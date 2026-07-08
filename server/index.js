@@ -83,6 +83,34 @@ function serviceDurationMinutes(serviceOrMinutes) {
   return Math.max(60, Math.ceil(value / 60) * 60);
 }
 
+function moneyAmount(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function createNotification({ role = "admin", staffId = "", title, message, type = "system", data = {} }) {
+  const notification = {
+    id: `ntf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    role,
+    staffId,
+    title,
+    message,
+    type,
+    read: false,
+    data,
+    createdAt: new Date().toISOString(),
+  };
+  state.notifications.unshift(notification);
+  void upsertSupabaseRecord("notifications", notification);
+  io.emit("notifications:update", state.notifications.filter((item) => item.role === "admin"));
+  if (staffId) io.to(`staff:${staffId}`).emit("notification:new", notification);
+  return notification;
+}
+
+function sendTransactionalEmail({ to, subject, body, type }) {
+  if (!to) return;
+  console.info(`[email:${type || "transactional"}] to=${to} subject="${subject}" body="${body.replace(/\s+/g, " ").trim()}"`);
+}
+
 const services = [];
 
 let staff = [];
@@ -106,6 +134,7 @@ const state = {
   payroll: [],
   payrollAdjustments: [],
   expenses: [],
+  notifications: [],
   settings: {
     id: "salon-settings",
     salonName: "Flourish Salon Pro",
@@ -152,6 +181,7 @@ const supabaseTables = {
   payrollAdjustments: "salon_payroll_adjustment_records",
   expenses: "salon_expense_records",
   settings: "salon_settings_records",
+  notifications: "salon_notification_records",
 };
 
 function assignTableRows(key, rows) {
@@ -357,6 +387,7 @@ function normalizeStaffPayload(input, existing = {}) {
     baseSalary: Math.max(0, Number(input.baseSalary ?? existing.baseSalary ?? 0) || 0),
     status: input.status || existing.status || "online",
     credentialEmail,
+    phone: String(input.phone ?? existing.phone ?? "").trim(),
     activePassword: existing.activePassword,
     passwordUpdatedAt: existing.passwordUpdatedAt,
     bio: String(input.bio ?? existing.bio ?? "").trim(),
@@ -417,7 +448,7 @@ function payrollRows(month = monthKey()) {
       revenue,
       deductions,
       bonuses,
-      payable: Math.max(0, baseSalary + commission + bonuses - deductions),
+      payable: moneyAmount(Math.max(0, baseSalary + commission + bonuses - deductions)),
       paid: Boolean(record.paid),
       paidAt: record.paidAt,
       adjustments,
@@ -428,14 +459,14 @@ function payrollRows(month = monthKey()) {
 
 function financialSummary(month = monthKey()) {
   const invoices = state.invoices.filter((invoice) => String(invoice.date).startsWith(month) && invoice.status === "Paid");
-  const grossRevenue = invoices.reduce((sum, invoice) => sum + Number(invoice.subtotal || invoice.total || 0), 0);
-  const discounts = invoices.reduce((sum, invoice) => sum + Number(invoice.discount || 0), 0);
-  const netRevenue = invoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const grossRevenue = moneyAmount(invoices.reduce((sum, invoice) => sum + Number(invoice.subtotal || invoice.total || 0), 0));
+  const discounts = moneyAmount(invoices.reduce((sum, invoice) => sum + Number(invoice.discount || 0), 0));
+  const netRevenue = moneyAmount(invoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0));
   const payroll = payrollRows(month);
-  const payrollPayable = payroll.reduce((sum, row) => sum + row.payable, 0);
-  const payrollPaid = payroll.filter((row) => row.paid).reduce((sum, row) => sum + row.payable, 0);
+  const payrollPayable = moneyAmount(payroll.reduce((sum, row) => sum + row.payable, 0));
+  const payrollPaid = moneyAmount(payroll.filter((row) => row.paid).reduce((sum, row) => sum + row.payable, 0));
   const expenses = state.expenses.filter((expense) => String(expense.date).startsWith(month));
-  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const expenseTotal = moneyAmount(expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0));
   return {
     month,
     grossRevenue,
@@ -443,11 +474,11 @@ function financialSummary(month = monthKey()) {
     netRevenue,
     payrollPayable,
     payrollPaid,
-    payrollUnpaid: payrollPayable - payrollPaid,
+    payrollUnpaid: moneyAmount(payrollPayable - payrollPaid),
     expenseTotal,
     operatingExpenses: expenseTotal,
-    profitAfterPayroll: netRevenue - payrollPayable,
-    netProfit: netRevenue - payrollPayable - expenseTotal,
+    profitAfterPayroll: moneyAmount(netRevenue - payrollPayable),
+    netProfit: moneyAmount(netRevenue - payrollPayable - expenseTotal),
     invoiceCount: invoices.length,
     visitCount: invoices.length,
     expenseCount: expenses.length,
@@ -549,7 +580,7 @@ function normalizeExpensePayload(input) {
     category: String(input.category || "Miscellaneous").trim(),
     vendor: String(input.vendor || "").trim(),
     description: String(input.description || "").trim(),
-    amount: Math.max(0, Number(input.amount || 0)),
+    amount: moneyAmount(Math.max(0, Number(input.amount || 0))),
   };
 }
 
@@ -566,12 +597,12 @@ function normalizeInvoicePayload(input) {
       staffId: item.staffId,
       quantity,
       unitPrice,
-      total: quantity * unitPrice,
+      total: moneyAmount(quantity * unitPrice),
       custom: !service,
     };
   }).filter((item) => item.name && item.staffId && item.total >= 0);
-  const subtotal = normalizedItems.reduce((sum, item) => sum + item.total, 0);
-  const discount = Math.max(0, Number(input.discount || 0));
+  const subtotal = moneyAmount(normalizedItems.reduce((sum, item) => sum + item.total, 0));
+  const discount = moneyAmount(Math.max(0, Number(input.discount || 0)));
   return {
     customer: String(input.customer || "").trim(),
     payment: String(input.payment || "Cash"),
@@ -579,7 +610,7 @@ function normalizeInvoicePayload(input) {
     items: normalizedItems,
     subtotal,
     discount,
-    total: Math.max(0, subtotal - discount),
+    total: moneyAmount(Math.max(0, subtotal - discount)),
   };
 }
 
@@ -923,6 +954,9 @@ io.on("connection", (socket) => {
   socket.on("schedule:join", ({ staffId, date }) => {
     socket.join(`schedule:${staffId}:${date}`);
   });
+  socket.on("staff:join", ({ staffId }) => {
+    if (staffId) socket.join(`staff:${staffId}`);
+  });
 });
 
 app.get("/api/health", async (_req, res) => {
@@ -936,6 +970,27 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api/tenant", requireRole("admin", "staff"), (_req, res) => res.json(state.tenant));
+app.get("/api/notifications", requireRole("admin", "staff"), (req, res) => {
+  const role = roleFromRequest(req);
+  const staffId = staffFromRequest(req);
+  const rows = state.notifications.filter((item) =>
+    role === "admin" ? item.role === "admin" : item.staffId === staffId
+  );
+  res.json(rows);
+});
+app.patch("/api/notifications/:id/read", requireRole("admin", "staff"), (req, res) => {
+  const notification = state.notifications.find((item) => item.id === req.params.id);
+  if (!notification) return res.status(404).json({ error: "Notification not found" });
+  if (roleFromRequest(req) === "staff" && notification.staffId !== staffFromRequest(req)) {
+    return res.status(403).json({ error: "Forbidden for this notification" });
+  }
+  notification.read = true;
+  notification.readAt = new Date().toISOString();
+  void upsertSupabaseRecord("notifications", notification);
+  io.emit("notifications:update", state.notifications.filter((item) => item.role === "admin"));
+  if (notification.staffId) io.to(`staff:${notification.staffId}`).emit("notification:update", notification);
+  res.json(notification);
+});
 app.get("/api/settings", requireRole("admin", "staff"), (_req, res) => {
   res.json({
     tenant: state.tenant,
@@ -1029,6 +1084,8 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
   if (!verifyPin(req, res)) return;
   const payload = normalizeStaffPayload(req.body);
   if (!payload.name) return res.status(400).json({ error: "Staff name is required" });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.credentialEmail)) return res.status(400).json({ error: "Valid staff email is required" });
+  if (!String(payload.phone || "").replace(/\D/g, "").match(/^\d{7,15}$/)) return res.status(400).json({ error: "Valid staff phone number is required" });
   const temporaryPassword = generateTemporaryPassword();
   const member = {
     id: `stf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1039,6 +1096,19 @@ app.post("/api/staff", requireRole("admin"), (req, res) => {
   };
   staff.push(member);
   void upsertSupabaseRecord("staff", member);
+  createNotification({
+    role: "admin",
+    title: "New staff member added",
+    message: `${member.name} was onboarded with login ${member.credentialEmail}.`,
+    type: "staff",
+    data: { staffId: member.id },
+  });
+  sendTransactionalEmail({
+    to: member.credentialEmail,
+    subject: "Your Flourish Salon Pro staff account",
+    body: `Welcome ${member.name}. Your login email is ${member.credentialEmail} and temporary password is ${temporaryPassword}.`,
+    type: "staff-onboarding",
+  });
   io.emit("staff:update", member);
   res.status(201).json({ ...member, credentials: { email: member.credentialEmail, password: temporaryPassword } });
 });
@@ -1049,6 +1119,8 @@ app.patch("/api/staff/:id", requireRole("admin"), (req, res) => {
   if (index === -1) return res.status(404).json({ error: "Staff member not found" });
   const member = normalizeStaffPayload(req.body, staff[index]);
   if (!member.name) return res.status(400).json({ error: "Staff name is required" });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(member.credentialEmail)) return res.status(400).json({ error: "Valid staff email is required" });
+  if (!String(member.phone || "").replace(/\D/g, "").match(/^\d{7,15}$/)) return res.status(400).json({ error: "Valid staff phone number is required" });
   member.credentialEmail = uniqueStaffEmail(member.credentialEmail, member.id);
   if (req.body.overridePassword) {
     const nextPassword = String(req.body.overridePassword).trim();
@@ -1189,6 +1261,36 @@ app.post("/api/bookings", (req, res) => {
     phone: customerPhone,
   });
   if (hold) hold.status = "converted";
+  const staffMember = getStaffMember(staffId);
+  createNotification({
+    role: "admin",
+    title: "New booking confirmed",
+    message: `${customerName} booked ${service.name} with ${staffMember?.name || "staff"} on ${date} at ${time}.`,
+    type: "booking",
+    data: { appointmentId: appointment.id },
+  });
+  if (staffMember) {
+    createNotification({
+      role: "staff",
+      staffId: staffMember.id,
+      title: "New appointment assigned",
+      message: `${customerName} booked ${service.name} for ${date} at ${time}.`,
+      type: "booking",
+      data: { appointmentId: appointment.id },
+    });
+    sendTransactionalEmail({
+      to: staffMember.credentialEmail,
+      subject: "New appointment assigned",
+      body: `${customerName} booked ${service.name} for ${date} at ${time}.`,
+      type: "booking-staff",
+    });
+  }
+  sendTransactionalEmail({
+    to: customerEmail,
+    subject: "Your appointment is confirmed",
+    body: `Your ${service.name} appointment is confirmed for ${date} at ${time}. Address: ${state.settings.address || state.settings.city || "Flourish Salon Pro"}. Cancellation policy: please cancel at least 4 hours before your appointment.`,
+    type: "booking-client",
+  });
   void upsertSupabaseRecord("appointments", appointment);
   emitSchedule(staffId, appointment.startAt.slice(0, 10));
   io.emit("appointments:update", state.appointments);
@@ -1449,6 +1551,14 @@ app.patch("/api/admin/leave-requests/:id", requireRole("admin"), (req, res) => {
       cursor.setDate(cursor.getDate() + 1);
     }
   }
+  createNotification({
+    role: "staff",
+    staffId: request.staffId,
+    title: `Leave request ${request.status}`,
+    message: `Your leave request for ${request.fromDate} to ${request.toDate} has been ${request.status}.`,
+    type: "leave",
+    data: { requestId: request.id },
+  });
   io.emit("leave:update", request);
   io.emit("attendance:update", attendanceSummary(request.fromDate));
   res.json(request);
@@ -1529,6 +1639,17 @@ app.patch("/api/payroll/:staffId/status", requireRole("admin"), (req, res) => {
   record.paidAt = record.paid ? new Date().toISOString() : null;
   record.updatedAt = new Date().toISOString();
   void upsertSupabaseRecord("payroll", { id: `${record.staffId}-${record.month}`, ...record });
+  if (record.paid) {
+    const paidRow = payrollRows(month).find((row) => row.staffId === staffMember.id);
+    createNotification({
+      role: "staff",
+      staffId: staffMember.id,
+      title: "Salary payment confirmed",
+      message: `Your ${month} salary has been marked paid. Net payable: Rs. ${Number(paidRow?.payable || 0).toLocaleString("en-PK")}.`,
+      type: "payroll",
+      data: { staffId: staffMember.id, month, paidAt: record.paidAt },
+    });
+  }
   io.emit("payroll:update", payrollRows(month));
   res.json(payrollRows(month).find((row) => row.staffId === staffMember.id));
 });
@@ -1619,7 +1740,8 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
     createdAt: new Date().toISOString(),
   };
   state.invoices.unshift(invoice);
-  upsertCustomer({ name: invoice.customer, email: invoice.customerEmail, phone: invoice.customerPhone });
+  const { customer: linkedCustomer } = upsertCustomer({ name: invoice.customer, email: invoice.customerEmail, phone: invoice.customerPhone });
+  invoice.customerId = linkedCustomer.id;
   void upsertSupabaseRecord("invoices", invoice);
   io.emit("invoices:update", state.invoices);
   io.emit("customers:update", localCustomerRows());

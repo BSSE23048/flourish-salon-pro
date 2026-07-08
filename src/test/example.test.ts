@@ -21,6 +21,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 vi.mock("socket.io-client", () => ({
   io: vi.fn(() => ({
     on: vi.fn(),
+    emit: vi.fn(),
     disconnect: vi.fn(),
   })),
 }));
@@ -84,7 +85,8 @@ describe("StaffPortal dashboard", () => {
   it("loads and renders the staff dashboard summary, leave request controls, and schedule", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
-      .mockResolvedValueOnce(apiResponse(attendance()) as Response);
+      .mockResolvedValueOnce(apiResponse(attendance()) as Response)
+      .mockResolvedValueOnce(apiResponse([]) as Response);
 
     await renderStaffPortal();
 
@@ -106,6 +108,7 @@ describe("StaffPortal dashboard", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
       .mockResolvedValueOnce(apiResponse(attendance()) as Response)
+      .mockResolvedValueOnce(apiResponse([]) as Response)
       .mockResolvedValueOnce(apiResponse({ id: "leave-1", status: "pending" }) as Response)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
       .mockResolvedValueOnce(apiResponse(attendance()) as Response);
@@ -129,6 +132,7 @@ describe("StaffPortal dashboard", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
       .mockResolvedValueOnce(apiResponse(attendance()) as Response)
+      .mockResolvedValueOnce(apiResponse([]) as Response)
       .mockRejectedValueOnce(new Error("Failed to fetch"));
 
     await renderStaffPortal();
@@ -143,6 +147,7 @@ describe("StaffPortal dashboard", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(apiResponse(schedule()) as Response)
       .mockResolvedValueOnce(apiResponse(attendance()) as Response)
+      .mockResolvedValueOnce(apiResponse([]) as Response)
       .mockResolvedValueOnce(apiResponse({ error: "Appointment is already closed" }, false) as Response);
 
     await renderStaffPortal();

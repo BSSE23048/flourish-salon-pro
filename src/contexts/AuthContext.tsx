@@ -23,13 +23,20 @@ function toAppRole(value: string | null | undefined): AppRole {
   return appRoles.includes(value as AppRole) ? (value as AppRole) : "customer";
 }
 
+function resolveRole(rows: Array<{ role?: string }> | null | undefined): AppRole {
+  const roles = (rows || []).map((row) => row.role);
+  if (roles.includes("owner")) return "owner";
+  if (roles.includes("staff")) return "staff";
+  return roles.includes("customer") ? "customer" : "customer";
+}
+
 interface AuthContextType {
   session: AuthSession | null;
   user: AuthUser | null;
   profile: { full_name: string; email: string | null } | null;
   role: AppRole | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null; role?: AppRole }>;
+  signIn: (email: string, password: string, expectedRole?: AppRole) => Promise<{ error: string | null; role?: AppRole }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
@@ -53,12 +60,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const [profileRes, roleRes] = await Promise.all([
         supabase.from("profiles").select("full_name, email").eq("user_id", userId).single(),
-        supabase.from("user_roles").select("role").eq("user_id", userId).single(),
+        supabase.from("user_roles").select("role").eq("user_id", userId),
       ]);
       if (profileRes.data) setProfile(profileRes.data);
       if (roleRes.data) {
-        setRole(roleRes.data.role);
-        writeRoleCookie(roleRes.data.role);
+        const nextRole = resolveRole(roleRes.data);
+        setRole(nextRole);
+        writeRoleCookie(nextRole);
       }
     } catch {
       setProfile({ full_name: "Salon Admin", email: DEMO_EMAIL });
@@ -137,13 +145,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [fetchUserData, setDemoSession, syncCustomerIfNeeded]);
 
-  const signIn: AuthContextType["signIn"] = async (email, password) => {
+  const roleMismatch = (actual: AppRole, expected?: AppRole) =>
+    expected && actual !== expected ? "Invalid credentials for this role portal." : null;
+
+  const signIn: AuthContextType["signIn"] = async (email, password, expectedRole) => {
     if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
+      const mismatch = roleMismatch("owner", expectedRole);
+      if (mismatch) return { error: mismatch };
       setDemoSession(DEMO_EMAIL, "Salon Admin", "owner");
       return { error: null, role: "owner" };
     }
 
     if (email.trim().toLowerCase() === STAFF_DEMO_EMAIL && password === STAFF_DEMO_PASSWORD) {
+      const mismatch = roleMismatch("staff", expectedRole);
+      if (mismatch) return { error: mismatch };
       setDemoSession(STAFF_DEMO_EMAIL, "Sara Ahmed", "staff", "stf-sara");
       return { error: null, role: "staff" };
     }
@@ -157,6 +172,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         const data = await res.json();
         if (res.ok) {
+          const mismatch = roleMismatch("staff", expectedRole);
+          if (mismatch) return { error: mismatch };
           setDemoSession(data.staff.email, data.staff.name, "staff", data.staff.id);
           return { error: null, role: "staff" };
         }
@@ -171,9 +188,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) return { error: error.message };
 
       const userRole = data.user
-        ? await supabase.from("user_roles").select("role").eq("user_id", data.user.id).single()
+        ? await supabase.from("user_roles").select("role").eq("user_id", data.user.id)
         : null;
-      const resolvedRole = toAppRole(userRole?.data?.role);
+      const resolvedRole = userRole?.data ? resolveRole(userRole.data) : toAppRole(null);
+      const mismatch = roleMismatch(resolvedRole, expectedRole);
+      if (mismatch) {
+        await supabase.auth.signOut().catch(() => undefined);
+        return { error: mismatch };
+      }
       setRole(resolvedRole);
       writeRoleCookie(resolvedRole);
       return { error: null, role: resolvedRole };
