@@ -304,7 +304,9 @@ function isStaffBookable(staffId) {
 }
 
 function attendanceFor(staffId, date = today()) {
-  return state.attendance.find((entry) => entry.staffId === staffId && entry.date === date);
+  return state.attendance
+    .filter((entry) => entry.staffId === staffId && entry.date === date)
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime())[0];
 }
 
 function monthKey(value = today()) {
@@ -323,12 +325,21 @@ function workingDaysElapsed(month = monthKey()) {
 
 function staffAttendancePercentage(staffId, month = monthKey()) {
   const totalDays = workingDaysElapsed(month);
-  const presentDays = state.attendance.filter((entry) =>
-    entry.staffId === staffId &&
-    entry.date.startsWith(month) &&
-    ["present", "half_day", "paid_leave", "clocked_in", "clocked_out"].includes(entry.status)
-  ).reduce((sum, entry) => sum + (entry.status === "half_day" ? 0.5 : 1), 0);
-  return totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+  const byDate = dedupedAttendanceRows(staffId, month)
+    .filter((entry) => Number(entry.date.slice(8, 10)) <= totalDays);
+  const presentDays = byDate
+    .filter((entry) => ["present", "half_day", "paid_leave", "clocked_in", "clocked_out"].includes(entry.status))
+    .reduce((sum, entry) => sum + (entry.status === "half_day" ? 0.5 : 1), 0);
+  return totalDays > 0 ? Math.min(100, Math.max(0, Math.round((presentDays / totalDays) * 100))) : 0;
+}
+
+function dedupedAttendanceRows(staffId, month = monthKey()) {
+  const rowsByDate = new Map();
+  state.attendance
+    .filter((entry) => entry.staffId === staffId && String(entry.date || "").startsWith(month))
+    .sort((a, b) => new Date(a.updatedAt || a.createdAt || 0).getTime() - new Date(b.updatedAt || b.createdAt || 0).getTime())
+    .forEach((entry) => rowsByDate.set(entry.date, entry));
+  return Array.from(rowsByDate.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
 function normalizeStaffPayload(input, existing = {}) {
@@ -438,9 +449,58 @@ function financialSummary(month = monthKey()) {
     profitAfterPayroll: netRevenue - payrollPayable,
     netProfit: netRevenue - payrollPayable - expenseTotal,
     invoiceCount: invoices.length,
+    visitCount: invoices.length,
     expenseCount: expenses.length,
     expenses,
   };
+}
+
+function invoiceSequenceNumber(invoice) {
+  const explicitNumber = Number(invoice.invoiceNumber || invoice.number);
+  const idMatch = String(invoice.id || "").match(/(\d+)$/);
+  return Number.isFinite(explicitNumber) && explicitNumber > 0
+    ? explicitNumber
+    : Number(idMatch?.[1] || 0);
+}
+
+function formatInvoiceId(number) {
+  return `INV-${String(number).padStart(3, "0")}`;
+}
+
+function sortInvoicesForRenumbering() {
+  return [...state.invoices].sort((a, b) => {
+    const dateDiff = new Date(a.createdAt || `${a.date}T00:00:00`).getTime() - new Date(b.createdAt || `${b.date}T00:00:00`).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    return invoiceSequenceNumber(a) - invoiceSequenceNumber(b);
+  });
+}
+
+async function renumberInvoices() {
+  const ordered = sortInvoicesForRenumbering();
+  const updates = [];
+  ordered.forEach((invoice, index) => {
+    const nextNumber = index + 1;
+    const nextId = formatInvoiceId(nextNumber);
+    if (invoice.invoiceNumber !== nextNumber || invoice.id !== nextId) {
+      const previousId = invoice.id;
+      invoice.previousIds = Array.from(new Set([...(invoice.previousIds || []), previousId].filter(Boolean)));
+      invoice.invoiceNumber = nextNumber;
+      invoice.id = nextId;
+      invoice.updatedAt = new Date().toISOString();
+      updates.push({ previousId, invoice });
+    } else {
+      invoice.invoiceNumber = nextNumber;
+    }
+  });
+  state.invoices = [...ordered].sort((a, b) => invoiceSequenceNumber(b) - invoiceSequenceNumber(a));
+  for (const update of updates) {
+    if (update.previousId !== update.invoice.id) await deleteSupabaseRecord("invoices", update.previousId);
+    await upsertSupabaseRecord("invoices", update.invoice);
+  }
+}
+
+function nextInvoiceNumber() {
+  return Math.max(0, ...state.invoices.map(invoiceSequenceNumber)) + 1;
 }
 
 function normalizeSettingsPayload(input = {}, existing = state.settings) {
@@ -1297,7 +1357,7 @@ app.get("/api/staff/me/attendance", requireRole("staff", "admin"), (req, res) =>
   res.json({
     month,
     percentage: staffAttendancePercentage(staffId, month),
-    rows: state.attendance.filter((entry) => entry.staffId === staffId && entry.date.startsWith(month)),
+    rows: dedupedAttendanceRows(staffId, month),
     leaveRequests: state.leaveRequests.filter((entry) => entry.staffId === staffId && String(entry.fromDate).startsWith(month)),
   });
 });
@@ -1329,7 +1389,7 @@ app.get("/api/admin/attendance", requireRole("admin"), (req, res) => {
       staffId: member.id,
       name: member.name,
       percentage: staffAttendancePercentage(member.id, month),
-      rows: state.attendance.filter((entry) => entry.staffId === member.id && entry.date.startsWith(month)),
+      rows: dedupedAttendanceRows(member.id, month),
     })),
     leaveRequests: state.leaveRequests,
   });
@@ -1350,6 +1410,13 @@ app.post("/api/admin/attendance", requireRole("admin"), (req, res) => {
   entry.clockOutAt = req.body.clockOutAt || null;
   entry.markedBy = "admin";
   entry.updatedAt = new Date().toISOString();
+  const duplicateIds = state.attendance
+    .filter((item) => item !== entry && item.staffId === staffId && item.date === date)
+    .map((item) => item.id);
+  if (duplicateIds.length > 0) {
+    state.attendance = state.attendance.filter((item) => !duplicateIds.includes(item.id));
+    for (const id of duplicateIds) void deleteSupabaseRecord("attendance", id);
+  }
   void upsertSupabaseRecord("attendance", entry);
   io.emit("attendance:update", attendanceSummary(date));
   res.status(201).json(entry);
@@ -1471,10 +1538,14 @@ app.post("/api/payroll/adjustments", requireRole("admin"), (req, res) => {
   const type = req.body.type === "bonus" ? "bonus" : "deduction";
   const amount = Math.max(0, Number(req.body.amount || 0));
   if (amount <= 0) return res.status(400).json({ error: "Adjustment amount is required" });
+  const adjustmentMonth = req.body.month || monthKey();
+  if (payrollRecordFor(staffMember.id, adjustmentMonth).paid) {
+    return res.status(409).json({ error: "Paid salary records are locked. Bonuses and deductions cannot be changed after payment." });
+  }
   const adjustment = {
     id: `adj-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     staffId: staffMember.id,
-    month: req.body.month || monthKey(),
+    month: adjustmentMonth,
     type,
     amount,
     reason: String(req.body.reason || "").trim(),
@@ -1488,6 +1559,10 @@ app.post("/api/payroll/adjustments", requireRole("admin"), (req, res) => {
 app.delete("/api/payroll/adjustments/:id", requireRole("admin"), (req, res) => {
   const index = state.payrollAdjustments.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Adjustment not found" });
+  const adjustment = state.payrollAdjustments[index];
+  if (payrollRecordFor(adjustment.staffId, adjustment.month).paid) {
+    return res.status(409).json({ error: "Paid salary records are locked. Adjustments cannot be deleted after payment." });
+  }
   const [removed] = state.payrollAdjustments.splice(index, 1);
   void deleteSupabaseRecord("payrollAdjustments", removed.id);
   io.emit("payroll:update", payrollRows(removed.month));
@@ -1532,8 +1607,10 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   for (const item of payload.items) {
     if (!getStaffMember(item.staffId)) return res.status(404).json({ error: `Staff member not found for ${item.name}` });
   }
+  const invoiceNumber = nextInvoiceNumber();
   const invoice = {
-    id: `INV-${Date.now().toString().slice(-6)}`,
+    id: formatInvoiceId(invoiceNumber),
+    invoiceNumber,
     date: req.body.date || today(),
     source: "walk-in",
     customerEmail: req.body.customerEmail || "",
@@ -1551,6 +1628,26 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   io.emit("financials:update", financialSummary(monthKey(invoice.date)));
   res.status(201).json(invoice);
 });
+app.delete("/api/invoices/:id", requireRole("admin"), async (req, res) => {
+  if (!verifyPin(req, res)) return;
+  const invoiceNumber = String(req.body.invoiceNumber || req.query.invoiceNumber || "").trim();
+  const index = state.invoices.findIndex((invoice) => invoice.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: "Invoice not found" });
+  const invoice = state.invoices[index];
+  if (invoiceNumber && invoiceNumber !== invoice.id && invoiceNumber !== String(invoice.invoiceNumber || "")) {
+    return res.status(400).json({ error: "Invoice number does not match the selected invoice" });
+  }
+  const [removed] = state.invoices.splice(index, 1);
+  await deleteSupabaseRecord("invoices", removed.id);
+  await renumberInvoices();
+  const month = monthKey(removed.date);
+  io.emit("invoices:update", state.invoices);
+  io.emit("customers:update", localCustomerRows());
+  io.emit("staff:commission:update", invoiceCommissions(month));
+  io.emit("payroll:update", payrollRows(month));
+  io.emit("financials:update", financialSummary(month));
+  res.json({ deleted: removed, invoices: state.invoices });
+});
 app.get("/api/plans", requireRole("admin"), (_req, res) => res.json(plans));
 app.post("/api/subscription/checkout", requireRole("admin"), (req, res) => {
   const plan = plans.find((item) => item.id === req.body.planId);
@@ -1559,6 +1656,7 @@ app.post("/api/subscription/checkout", requireRole("admin"), (req, res) => {
 });
 
 await hydrateSupabaseOperationalData();
+await renumberInvoices();
 
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
 

@@ -306,6 +306,7 @@ export default function Reports() {
   const popularServices = useMemo(() => buildPopularServices(invoices, services, month), [invoices, month, services]);
   const peakHours = useMemo(() => buildPeakHours(appointments, month), [appointments, month]);
   const staffRevenue = useMemo(() => buildStaffRevenue(invoices, staff, month), [invoices, month, staff]);
+  const monthlyVisitCount = useMemo(() => invoices.filter((invoice) => String(invoice.date).startsWith(month)).length, [invoices, month]);
   const paidInvoices = useMemo(() =>
     invoices.filter((invoice) => invoice.status === "Paid" && String(invoice.date).startsWith(month)),
   [invoices, month]);
@@ -360,6 +361,7 @@ export default function Reports() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <StatCard title="Paid Revenue" value={money(financials.netRevenue)} icon={<DollarSign />} subtitle={`${financials.invoiceCount} paid invoices`} variant="success" />
         <StatCard title="Bookings" value={appointments.filter((appointment) => localDateKey(new Date(appointment.startAt)).startsWith(month)).length} icon={<CalendarDays />} subtitle="scheduled this month" />
+        <StatCard title="Monthly Visits" value={monthlyVisitCount} icon={<ReceiptText />} subtitle="calculated from generated invoices" />
         <StatCard title="Expenses" value={money(financials.expenseTotal)} icon={<ReceiptText />} subtitle={`${financials.expenseCount} entries`} variant="warning" />
         <StatCard
           title="Final Profit"

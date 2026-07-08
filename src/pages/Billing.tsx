@@ -125,6 +125,9 @@ export default function Billing() {
   const [discountEnabled, setDiscountEnabled] = useState(false);
   const [discount, setDiscount] = useState("0");
   const [items, setItems] = useState<InvoiceItem[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
+  const [deletePin, setDeletePin] = useState("");
+  const [deleteInvoiceNumber, setDeleteInvoiceNumber] = useState("");
 
   const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.total, 0), [items]);
   const discountAmount = discountEnabled ? Math.max(0, Number(discount || 0)) : 0;
@@ -223,6 +226,26 @@ export default function Billing() {
     }
   };
 
+  const deleteInvoice = async () => {
+    if (!deleteTarget) return;
+    try {
+      const res = await fetch(`${API_URL}/api/invoices/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "x-role": "admin", "x-security-pin": deletePin },
+        body: JSON.stringify({ invoiceNumber: deleteInvoiceNumber }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not delete invoice");
+      toast.success(`${deleteTarget.id} deleted and invoice numbers adjusted`);
+      setDeleteTarget(null);
+      setDeletePin("");
+      setDeleteInvoiceNumber("");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete invoice");
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -266,6 +289,7 @@ export default function Billing() {
                 <div className="flex items-center gap-1">
                   <button title="Download invoice" onClick={() => downloadInvoice(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Download className="h-4 w-4" /></button>
                   <button title="Print receipt" onClick={() => printReceipt(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Printer className="h-4 w-4" /></button>
+                  <button title="Delete invoice" onClick={() => { setDeleteTarget(row); setDeleteInvoiceNumber(row.id); setDeletePin(""); }} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
                 </div>
               ),
             },
@@ -335,6 +359,25 @@ export default function Billing() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
             <Button onClick={createInvoice}>Generate Invoice</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Invoice</DialogTitle>
+            <DialogDescription>
+              Enter security PIN and invoice number to delete this invoice. Remaining invoice numbers will be adjusted automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input value={deleteInvoiceNumber} onChange={(event) => setDeleteInvoiceNumber(event.target.value)} placeholder={`Invoice number, e.g. ${deleteTarget?.id || "INV-001"}`} />
+            <Input type="password" value={deletePin} onChange={(event) => setDeletePin(event.target.value)} placeholder="Security PIN" />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={deleteInvoice}>Delete Invoice</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

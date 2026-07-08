@@ -202,10 +202,10 @@ export default function Payroll() {
                   <Button size="sm" variant={row.paid ? "outline" : "default"} onClick={() => setConfirmPaidRow(row)} disabled={Boolean(row.paid)}>
                     <CheckCircle2 className="mr-1 h-3.5 w-3.5" />{row.paid ? "Paid Locked" : "Mark Paid"}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => { setAdjusting(row); setAdjustment({ type: "deduction", amount: "", reason: "" }); }}>
+                  <Button size="sm" variant="outline" onClick={() => { setAdjusting(row); setAdjustment({ type: "deduction", amount: "", reason: "" }); }} disabled={Boolean(row.paid)}>
                     <MinusCircle className="mr-1 h-3.5 w-3.5" />Deduct
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => { setAdjusting(row); setAdjustment({ type: "bonus", amount: "", reason: "" }); }}>
+                  <Button size="sm" variant="outline" onClick={() => { setAdjusting(row); setAdjustment({ type: "bonus", amount: "", reason: "" }); }} disabled={Boolean(row.paid)}>
                     <PlusCircle className="mr-1 h-3.5 w-3.5" />Bonus
                   </Button>
                 </div>
@@ -219,7 +219,7 @@ export default function Payroll() {
                   {row.adjustments.map((item) => (
                     <div key={item.id} className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span>{item.type}: {money(item.amount)} {item.reason && `- ${item.reason}`}</span>
-                      <button onClick={() => deleteAdjustment(item.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                      {!row.paid && <button onClick={() => deleteAdjustment(item.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>}
                     </div>
                   ))}
                 </div>
@@ -235,7 +235,9 @@ export default function Payroll() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{adjustment.type === "deduction" ? "Add Deduction / Penalty" : "Add Bonus"}</DialogTitle>
-            <DialogDescription>Adjust the selected staff member&apos;s payroll for this month.</DialogDescription>
+            <DialogDescription>
+              {adjusting?.paid ? "This salary is already paid, so adjustments are locked." : "Adjust the selected staff member's payroll for this month."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Select value={adjustment.type} onValueChange={(value) => setAdjustment({ ...adjustment, type: value })}>
@@ -249,7 +251,7 @@ export default function Payroll() {
             <Input placeholder="Reason" value={adjustment.reason} onChange={(event) => setAdjustment({ ...adjustment, reason: event.target.value })} />
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setAdjusting(null)}>Cancel</Button>
-              <Button onClick={saveAdjustment}>Save</Button>
+            <Button onClick={saveAdjustment} disabled={Boolean(adjusting?.paid)}>Save</Button>
             </div>
           </div>
         </DialogContent>
