@@ -239,10 +239,10 @@ function staffFromRequest(req) {
   return req.header("x-staff-id") || "";
 }
 
-function verifyPin(req, res) {
+function verifyPin(req, res, action = "this action") {
   const pin = String(req.body?.pin || req.header("x-pin") || "");
   if (pin !== "1234") {
-    res.status(403).json({ error: "Security PIN is required for staff changes" });
+    res.status(403).json({ error: `Security PIN is required for ${action}` });
     return false;
   }
   return true;
@@ -1629,7 +1629,7 @@ app.post("/api/invoices", requireRole("admin"), (req, res) => {
   res.status(201).json(invoice);
 });
 app.delete("/api/invoices/:id", requireRole("admin"), async (req, res) => {
-  if (!verifyPin(req, res)) return;
+  if (!verifyPin(req, res, "invoice deletion")) return;
   const invoiceNumber = String(req.body.invoiceNumber || req.query.invoiceNumber || "").trim();
   const index = state.invoices.findIndex((invoice) => invoice.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: "Invoice not found" });

@@ -231,8 +231,8 @@ export default function Billing() {
     try {
       const res = await fetch(`${API_URL}/api/invoices/${deleteTarget.id}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", "x-role": "admin", "x-security-pin": deletePin },
-        body: JSON.stringify({ invoiceNumber: deleteInvoiceNumber }),
+        headers: { "Content-Type": "application/json", "x-role": "admin", "x-pin": deletePin },
+        body: JSON.stringify({ invoiceNumber: deleteInvoiceNumber, pin: deletePin }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not delete invoice");
