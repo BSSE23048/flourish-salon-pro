@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform } from 'framer-motion';
 import type { MotionValue, Transition } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
+import { money } from '@/lib/format';
 
 const DRAG_BUFFER = 0;
 const VELOCITY_THRESHOLD = 500;
@@ -90,7 +91,7 @@ function CarouselCard({ item, index, itemWidth, trackItemOffset, x, transition, 
         <div className="flex items-center justify-between mt-6 pt-5 border-t border-[#e8e0d4]">
           <div>
             <p className="font-editorial text-2xl text-[#2c5545] leading-none">
-              {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(item.price)}
+              {money(item.price)}
             </p>
             <p className="text-[12px] text-[#7a7168] mt-1">{item.durationMinutes} min session</p>
           </div>

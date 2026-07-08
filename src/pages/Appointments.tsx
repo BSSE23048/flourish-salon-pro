@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localDateKey } from "@/lib/date";
+import { localTime } from "@/lib/format";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,7 @@ type Appointment = {
   id: string;
   customerName: string;
   customerEmail: string;
+  customerPhone?: string;
   staffId: string;
   serviceId: string;
   startAt: string;
@@ -50,7 +52,7 @@ export default function Appointments() {
   const [selectedAppointment, setSelectedAppointment] = useState<Record<string, unknown> | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    customerName: "", customerEmail: "",
+    customerName: "", customerEmail: "", customerPhone: "",
     serviceId: "", staffId: "",
     date: localDateKey(), time: "10:00",
   });
@@ -83,7 +85,7 @@ export default function Appointments() {
   const rows = appointments.map((a) => ({
     ...a,
     date: localDateKey(new Date(a.startAt)),
-    time: new Date(a.startAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+    time: localTime(a.startAt),
     customer: a.customerName,
     service: serviceMap[a.serviceId]?.name || a.serviceId,
     staffName: staffMap[a.staffId]?.name || a.staffId,
@@ -92,7 +94,7 @@ export default function Appointments() {
 
   const filtered = rows.filter((r) => {
     const q = search.toLowerCase();
-    const matchSearch = r.customer.toLowerCase().includes(q) || r.customerEmail.toLowerCase().includes(q);
+    const matchSearch = r.customer.toLowerCase().includes(q) || r.customerEmail.toLowerCase().includes(q) || String(r.customerPhone || "").includes(q);
     const matchStatus = statusFilter === "All" || r.displayStatus === statusFilter;
     return matchSearch && matchStatus;
   });
@@ -141,7 +143,16 @@ export default function Appointments() {
     { key: "date", label: "Date" },
     { key: "time", label: "Time" },
     { key: "customer", label: "Customer", render: (row: Record<string, unknown>) => <span className="font-medium">{row.customer as string}</span> },
-    { key: "customerEmail", label: "Email", render: (row: Record<string, unknown>) => <span className="text-muted-foreground">{row.customerEmail as string}</span> },
+    {
+      key: "customerEmail",
+      label: "Contact",
+      render: (row: Record<string, unknown>) => (
+        <div>
+          <p className="text-muted-foreground">{row.customerEmail as string}</p>
+          <p className="font-mono text-xs text-muted-foreground">{(row.customerPhone as string) || "No phone"}</p>
+        </div>
+      ),
+    },
     { key: "service", label: "Service" },
     { key: "staffName", label: "Staff" },
     { key: "status", label: "Status", render: (row: Record<string, unknown>) => <StatusBadge status={row.displayStatus as AppointmentStatus} /> },
@@ -253,6 +264,10 @@ export default function Appointments() {
               <Input type="email" placeholder="email@example.com" value={form.customerEmail} onChange={(e) => setForm({ ...form, customerEmail: e.target.value })} />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Customer Phone</label>
+              <Input type="tel" placeholder="0300-1234567" value={form.customerPhone} onChange={(e) => setForm({ ...form, customerPhone: e.target.value })} />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">Service</label>
               <Select value={form.serviceId} onValueChange={(v) => setForm({ ...form, serviceId: v })}>
                 <SelectTrigger><SelectValue placeholder="Select service" /></SelectTrigger>
@@ -294,6 +309,7 @@ export default function Appointments() {
               {[
                 ["Customer", selectedAppointment.customer],
                 ["Email", selectedAppointment.customerEmail || "Not added"],
+                ["Phone", selectedAppointment.customerPhone || "Not added"],
                 ["Service", selectedAppointment.service],
                 ["Staff", selectedAppointment.staffName],
                 ["Date", selectedAppointment.date],

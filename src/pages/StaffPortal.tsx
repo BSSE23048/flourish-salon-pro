@@ -13,11 +13,13 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localDateKey, localMonthKey } from "@/lib/date";
+import { localTime, money } from "@/lib/format";
 
 type Appointment = {
   id: string;
   customerName: string;
   customerEmail: string;
+  customerPhone?: string;
   serviceName?: string;
   startAt: string;
   endAt: string;
@@ -63,10 +65,6 @@ const getApiError = async (res: Response, fallback: string) => {
     return fallback;
   }
 };
-
-function money(value: number) {
-  return `Rs. ${Number(value || 0).toLocaleString()}`;
-}
 
 function statusBadge(status = "pending") {
   const normalized = status.toLowerCase();
@@ -290,12 +288,13 @@ export default function StaffPortal() {
                   {schedule.appointments.map((appointment) => (
                     <TableRow key={appointment.id}>
                       <TableCell>
-                        <p className="font-medium">{new Date(appointment.startAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(appointment.endAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</p>
+                        <p className="font-medium">{localTime(appointment.startAt)}</p>
+                        <p className="text-xs text-muted-foreground">{localTime(appointment.endAt)}</p>
                       </TableCell>
                       <TableCell>
                         <p className="font-medium">{appointment.customerName}</p>
                         <p className="text-xs text-muted-foreground">{appointment.customerEmail}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{appointment.customerPhone || "No phone"}</p>
                       </TableCell>
                       <TableCell>{appointment.serviceName || "Service"}</TableCell>
                       <TableCell>{statusBadge(appointment.status)}</TableCell>

@@ -1138,7 +1138,7 @@ export default function CustomerPortal() {
                   </div>
 
                   <p className="text-[14px] md:text-[16px] text-white/80 text-center max-w-[600px] mx-auto leading-relaxed mb-10">
-                    Real-time booking. Live staff availability. Deposit-protected slots. Your appointment, exactly as planned.
+                    Real-time booking. Live staff availability. Free slot confirmation. Your appointment, exactly as planned.
                   </p>
 
                   <div className="flex justify-center">

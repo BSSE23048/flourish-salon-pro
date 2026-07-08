@@ -24,6 +24,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localDateKey, localMonthKey } from "@/lib/date";
+import { localTime, money } from "@/lib/format";
 import { toast } from "sonner";
 
 type Expense = {
@@ -76,6 +77,18 @@ type Invoice = {
   status: string;
   createdAt?: string;
 };
+type PayrollRow = {
+  staffId: string;
+  name: string;
+  baseSalary: number;
+  commission: number;
+  bonuses: number;
+  deductions: number;
+  payable: number;
+  paid: boolean;
+  paidAt: string | null;
+  adjustments: Array<{ id: string; type: "bonus" | "deduction"; amount: number; reason: string }>;
+};
 
 const emptyFinancials: Financials = {
   month: localMonthKey(),
@@ -104,10 +117,6 @@ const tooltipStyle = {
 };
 
 const axisStyle = { fontSize: 11, fill: "hsl(25 15% 48%)", fontFamily: "Satoshi" };
-
-function money(value: number) {
-  return `Rs. ${Number(value || 0).toLocaleString()}`;
-}
 
 function formatDate(value?: string) {
   if (!value) return "-";
@@ -147,8 +156,7 @@ function buildPeakHours(appointments: Appointment[], month: string) {
   appointments
     .filter((appointment) => localDateKey(new Date(appointment.startAt)).startsWith(month))
     .forEach((appointment) => {
-      const date = new Date(appointment.startAt);
-      const hour = date.toLocaleTimeString("en-US", { hour: "numeric" });
+      const hour = localTime(appointment.startAt).replace(/:\d{2}/, "");
       totals.set(hour, (totals.get(hour) || 0) + 1);
     });
   return Array.from(totals.entries()).map(([hour, appointments]) => ({ hour, appointments }));
@@ -229,6 +237,7 @@ export default function Reports() {
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payrollRows, setPayrollRows] = useState<PayrollRow[]>([]);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
   const [expense, setExpense] = useState({
     date: localDateKey(),
@@ -240,28 +249,31 @@ export default function Reports() {
 
   const loadFinancials = useCallback(async () => {
     try {
-      const [financialRes, appointmentRes, serviceRes, staffRes, invoiceRes] = await Promise.all([
+      const [financialRes, appointmentRes, serviceRes, staffRes, invoiceRes, payrollRes] = await Promise.all([
         fetch(`${API_URL}/api/financials?month=${month}`, { headers: { "x-role": "admin" } }),
         fetch(`${API_URL}/api/appointments`, { headers: { "x-role": "admin" } }),
         fetch(`${API_URL}/api/services`, { headers: { "x-role": "admin" } }),
         fetch(`${API_URL}/api/staff?includeUnavailable=true`, { headers: { "x-role": "admin" } }),
         fetch(`${API_URL}/api/invoices`, { headers: { "x-role": "admin" } }),
+        fetch(`${API_URL}/api/payroll?month=${month}`, { headers: { "x-role": "admin" } }),
       ]);
-      if (![financialRes, appointmentRes, serviceRes, staffRes, invoiceRes].every((res) => res.ok)) {
+      if (![financialRes, appointmentRes, serviceRes, staffRes, invoiceRes, payrollRes].every((res) => res.ok)) {
         throw new Error("Could not load live report data");
       }
-      const [financialData, appointmentData, serviceData, staffData, invoiceData] = await Promise.all([
+      const [financialData, appointmentData, serviceData, staffData, invoiceData, payrollData] = await Promise.all([
         financialRes.json(),
         appointmentRes.json(),
         serviceRes.json(),
         staffRes.json(),
         invoiceRes.json(),
+        payrollRes.json(),
       ]);
       setFinancials({ ...emptyFinancials, ...financialData, expenses: Array.isArray(financialData.expenses) ? financialData.expenses : [] });
       setAppointments(Array.isArray(appointmentData) ? appointmentData : []);
       setServices(Array.isArray(serviceData) ? serviceData : []);
       setStaff(Array.isArray(staffData) ? staffData : []);
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
+      setPayrollRows(Array.isArray(payrollData.rows) ? payrollData.rows : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load financials");
     }
@@ -288,7 +300,7 @@ export default function Reports() {
     { name: "Revenue", value: financials.netRevenue },
     { name: "Payroll", value: financials.payrollPayable },
     { name: "Expenses", value: financials.expenseTotal },
-    { name: "Net Profit", value: financials.netProfit },
+    { name: "Final Margin", value: financials.netProfit },
   ], [financials]);
   const dailySales = useMemo(() => buildDailySales(invoices, month), [invoices, month]);
   const popularServices = useMemo(() => buildPopularServices(invoices, services, month), [invoices, month, services]);
@@ -480,6 +492,37 @@ export default function Reports() {
           ]}
           data={paidInvoices as unknown as Record<string, unknown>[]}
           emptyMessage="No paid invoices for this month"
+        />
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border p-5">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.15em] font-medium text-muted-foreground">Payroll</p>
+            <h3 className="font-editorial text-xl text-foreground">Payroll Record History</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">{payrollRows.length} staff records</p>
+        </div>
+        <DataTable
+          columns={[
+            { key: "name", label: "Staff", render: (row) => <span className="font-medium">{row.name as string}</span> },
+            { key: "baseSalary", label: "Base Salary", render: (row) => money(row.baseSalary as number) },
+            { key: "commission", label: "Earned Commission", render: (row) => money(row.commission as number) },
+            { key: "bonuses", label: "Bonuses Given", render: (row) => money(row.bonuses as number) },
+            { key: "deductions", label: "Deductions / Penalties", render: (row) => <span className="text-destructive">{money(row.deductions as number)}</span> },
+            { key: "payable", label: "Total Net Payable", render: (row) => <span className="font-semibold">{money(row.payable as number)}</span> },
+            { key: "paid", label: "Status", render: (row) => row.paid ? "Paid" : "Unpaid" },
+            {
+              key: "adjustments",
+              label: "Reasons",
+              render: (row) => {
+                const adjustments = row.adjustments as PayrollRow["adjustments"];
+                return adjustments?.length ? adjustments.map((item) => `${item.type}: ${money(item.amount)}${item.reason ? ` - ${item.reason}` : ""}`).join("; ") : "-";
+              },
+            },
+          ]}
+          data={payrollRows as unknown as Record<string, unknown>[]}
+          emptyMessage="No payroll records for this month"
         />
       </div>
 

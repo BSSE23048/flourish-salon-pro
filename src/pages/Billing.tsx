@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { Banknote, CreditCard, Download, Plus, Receipt, Smartphone, Trash2 } from "lucide-react";
+import { Banknote, CreditCard, Download, Plus, Printer, Receipt, Smartphone, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localDateKey } from "@/lib/date";
+import { money } from "@/lib/format";
 import { toast } from "sonner";
 
 type Service = { id: string; name: string; price: number };
 type Staff = { id: string; name: string };
 type InvoiceItem = { serviceId: string; name: string; staffId: string; quantity: number; unitPrice: number; total: number; custom: boolean };
-type Invoice = { id: string; date: string; customer: string; items: InvoiceItem[]; subtotal: number; discount: number; total: number; payment: string; status: string };
+type Invoice = { id: string; date: string; customer: string; customerEmail?: string; customerPhone?: string; items: InvoiceItem[]; subtotal: number; discount: number; total: number; payment: string; status: string };
 
 const paymentIcons: Record<string, React.ReactNode> = {
   Cash: <Banknote className="h-3.5 w-3.5" />,
@@ -22,10 +23,6 @@ const paymentIcons: Record<string, React.ReactNode> = {
   JazzCash: <Smartphone className="h-3.5 w-3.5" />,
   Easypaisa: <Smartphone className="h-3.5 w-3.5" />,
 };
-
-function money(value: number) {
-  return `Rs. ${Number(value || 0).toLocaleString()}`;
-}
 
 function downloadInvoice(invoice: Invoice) {
   const lines = invoice.items.map((item) =>
@@ -63,6 +60,57 @@ Thank you for choosing Flourish Salon Pro!
   a.click();
   URL.revokeObjectURL(url);
   toast.success(`Invoice ${invoice.id} downloaded`);
+}
+
+function printReceipt(invoice: Invoice) {
+  const rows = invoice.items.map((item) => `
+    <tr>
+      <td>${item.name}</td>
+      <td>${item.quantity}</td>
+      <td>${money(item.unitPrice)}</td>
+      <td>${money(item.total)}</td>
+    </tr>
+  `).join("");
+  const discountRow = invoice.discount > 0 ? `<tr><td colspan="3">Discount</td><td>-${money(invoice.discount)}</td></tr>` : "";
+  const popup = window.open("", "_blank", "width=440,height=720");
+  if (!popup) {
+    toast.error("Allow popups to print the receipt");
+    return;
+  }
+  popup.document.write(`
+    <html>
+      <head>
+        <title>Receipt ${invoice.id}</title>
+        <style>
+          @media print { button { display: none; } body { margin: 0; } }
+          body { font-family: Arial, sans-serif; color: #1a1a18; padding: 24px; }
+          h1 { font-size: 20px; margin: 0 0 4px; }
+          p { margin: 3px 0; font-size: 12px; color: #555; }
+          table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px; }
+          th, td { border-bottom: 1px solid #ddd; padding: 8px 4px; text-align: left; }
+          td:last-child, th:last-child { text-align: right; }
+          .total { margin-top: 16px; text-align: right; font-size: 18px; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <h1>Flourish Salon Pro</h1>
+        <p>Receipt ${invoice.id}</p>
+        <p>Date: ${invoice.date}</p>
+        <p>Customer: ${invoice.customer}</p>
+        ${invoice.customerPhone ? `<p>Phone: ${invoice.customerPhone}</p>` : ""}
+        <table>
+          <thead><tr><th>Service</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead>
+          <tbody>${rows}${discountRow}</tbody>
+        </table>
+        <div class="total">Total: ${money(invoice.total)}</div>
+        <p>Payment: ${invoice.payment} | Status: ${invoice.status}</p>
+        <button onclick="window.print()">Print Receipt</button>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  popup.print();
 }
 
 export default function Billing() {
@@ -211,7 +259,16 @@ export default function Billing() {
             { key: "discount", label: "Discount", render: (row) => row.discount > 0 ? money(row.discount) : "-" },
             { key: "total", label: "Total", render: (row) => <span className="font-semibold text-foreground">{money(row.total)}</span> },
             { key: "payment", label: "Payment", render: (row) => <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{paymentIcons[row.payment]} {row.payment}</span> },
-            { key: "actions", label: "", render: (row) => <button onClick={() => downloadInvoice(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Download className="h-4 w-4" /></button> },
+            {
+              key: "actions",
+              label: "",
+              render: (row) => (
+                <div className="flex items-center gap-1">
+                  <button title="Download invoice" onClick={() => downloadInvoice(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Download className="h-4 w-4" /></button>
+                  <button title="Print receipt" onClick={() => printReceipt(row)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Printer className="h-4 w-4" /></button>
+                </div>
+              ),
+            },
           ]}
           data={invoices}
         />

@@ -55,7 +55,7 @@ app.use(express.json({ limit: "10mb" }));
 
 const BUSINESS_OPEN_MINUTES = 10 * 60;
 const BUSINESS_CLOSE_MINUTES = 26 * 60;
-const SLOT_STEP_MINUTES = 30;
+const SLOT_STEP_MINUTES = 60;
 const BOOKING_CUTOFF_MINUTES = 120;
 const CANCEL_CUTOFF_MINUTES = 240;
 const HOLD_MINUTES = 7;
@@ -72,6 +72,16 @@ function dateKey(value = now()) {
 const today = () => dateKey(now());
 const appointmentDateKey = (appointment) => dateKey(appointment.startAt);
 const minutes = (value) => value * 60 * 1000;
+
+function businessTimeZoneOffsetMinutes() {
+  if (businessTimeZone === "Asia/Karachi") return 5 * 60;
+  return 0;
+}
+
+function serviceDurationMinutes(serviceOrMinutes) {
+  const value = typeof serviceOrMinutes === "number" ? serviceOrMinutes : Number(serviceOrMinutes?.durationMinutes || 60);
+  return Math.max(60, Math.ceil(value / 60) * 60);
+}
 
 const services = [];
 
@@ -114,6 +124,13 @@ const state = {
       reminderHours: 24,
       template: "Reminder: your appointment at {salon} is scheduled for {time}.",
     },
+    gmailAlerts: {
+      enabled: true,
+      bookingConfirmations: true,
+      staffUpdates: false,
+      senderName: "Flourish Salon Pro",
+      replyTo: "",
+    },
     notifications: {
       appointments: true,
       payroll: true,
@@ -126,6 +143,7 @@ const state = {
 
 const supabaseTables = {
   staff: "salon_staff_records",
+  customers: "salon_customer_records",
   services: "salon_service_records",
   appointments: "salon_appointment_records",
   attendance: "salon_attendance_records",
@@ -263,12 +281,13 @@ function getService(serviceId) {
 
 function normalizeServicePayload(input, existing = {}) {
   const price = Number(input.price ?? existing.price ?? 0);
-  const durationMinutes = Number(input.durationMinutes ?? input.duration ?? existing.durationMinutes ?? 30);
+  const rawDurationMinutes = Number(input.durationMinutes ?? input.duration ?? existing.durationMinutes ?? 60);
+  const durationMinutes = Math.max(60, Math.ceil(rawDurationMinutes / 60) * 60);
   return {
     ...existing,
     name: String(input.name ?? existing.name ?? "").trim(),
     category: String(input.category ?? existing.category ?? "Hair").trim(),
-    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 30,
+    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : 60,
     price: Number.isFinite(price) && price >= 0 ? price : 0,
     description: String(input.description ?? existing.description ?? "").trim(),
     imageUrl: String(input.imageUrl ?? existing.imageUrl ?? "/Hero_sec.png").trim() || "/Hero_sec.png",
@@ -426,6 +445,7 @@ function financialSummary(month = monthKey()) {
 
 function normalizeSettingsPayload(input = {}, existing = state.settings) {
   const whatsapp = input.whatsapp && typeof input.whatsapp === "object" ? input.whatsapp : {};
+  const gmailAlerts = input.gmailAlerts && typeof input.gmailAlerts === "object" ? input.gmailAlerts : {};
   const notifications = input.notifications && typeof input.notifications === "object" ? input.notifications : {};
   return {
     ...existing,
@@ -445,6 +465,13 @@ function normalizeSettingsPayload(input = {}, existing = state.settings) {
       enabled: Boolean(whatsapp.enabled ?? existing.whatsapp?.enabled),
       reminderHours: Math.max(1, Number(whatsapp.reminderHours ?? existing.whatsapp?.reminderHours ?? 24)),
       template: String(whatsapp.template ?? existing.whatsapp?.template ?? "").trim(),
+    },
+    gmailAlerts: {
+      enabled: Boolean(gmailAlerts.enabled ?? existing.gmailAlerts?.enabled ?? true),
+      bookingConfirmations: Boolean(gmailAlerts.bookingConfirmations ?? existing.gmailAlerts?.bookingConfirmations ?? true),
+      staffUpdates: Boolean(gmailAlerts.staffUpdates ?? existing.gmailAlerts?.staffUpdates ?? false),
+      senderName: String(gmailAlerts.senderName ?? existing.gmailAlerts?.senderName ?? input.salonName ?? existing.salonName ?? "Flourish Salon Pro").trim(),
+      replyTo: String(gmailAlerts.replyTo ?? existing.gmailAlerts?.replyTo ?? input.email ?? existing.email ?? "").trim(),
     },
     notifications: {
       appointments: Boolean(notifications.appointments ?? existing.notifications?.appointments),
@@ -497,11 +524,10 @@ function normalizeInvoicePayload(input) {
 }
 
 function atBusinessTime(date, hour, minute = 0) {
-  const base = new Date(`${date}T00:00:00`);
+  const [year, month, day] = String(date).split("-").map(Number);
   const extraDays = hour >= 24 ? 1 : 0;
-  base.setDate(base.getDate() + extraDays);
-  base.setHours(hour % 24, minute, 0, 0);
-  return base;
+  const utcMillis = Date.UTC(year, month - 1, day + extraDays, hour % 24, minute, 0, 0);
+  return new Date(utcMillis - minutes(businessTimeZoneOffsetMinutes()));
 }
 
 function parseBusinessStart(date, time) {
@@ -513,7 +539,7 @@ function parseBusinessStart(date, time) {
 function makeAppointment(input) {
   const service = getService(input.serviceId);
   const startAt = new Date(input.startAt);
-  const endAt = new Date(startAt.getTime() + minutes(service?.durationMinutes || input.durationMinutes || 30));
+  const endAt = new Date(startAt.getTime() + minutes(serviceDurationMinutes(service || input.durationMinutes)));
   return {
     id: input.id || `apt-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     customerName: input.customerName,
@@ -541,6 +567,8 @@ function upsertCustomer({ name, email = "", phone = "", notes = "" }) {
     customer.email = customer.email || normalizedEmail;
     customer.phone = customer.phone || phone;
     customer.notes = notes || customer.notes;
+    customer.updatedAt = new Date().toISOString();
+    void upsertSupabaseRecord("customers", customer);
     return { customer, created: false };
   }
 
@@ -553,6 +581,7 @@ function upsertCustomer({ name, email = "", phone = "", notes = "" }) {
     createdAt: new Date().toISOString(),
   };
   state.customers.unshift(nextCustomer);
+  void upsertSupabaseRecord("customers", nextCustomer);
   return { customer: nextCustomer, created: true };
 }
 
@@ -622,7 +651,7 @@ function normalizeCustomerRecord(record) {
   return {
     id: record.user_id || record.id,
     name,
-    phone: record.phone || "",
+    phone: record.phone || record.phone_number || record.mobile || "",
     email,
     totalBookings: Number(record.totalBookings ?? record.total_bookings ?? stats.totalBookings ?? 0),
     visits: Number(record.visits ?? record.visits_count ?? stats.visits ?? 0),
@@ -642,31 +671,98 @@ function localCustomerRows() {
   }));
 }
 
+async function safeSupabaseSelect(table, queryBuilder) {
+  if (!supabaseAdmin) return { data: [], error: null };
+  const { data, error } = await queryBuilder(supabaseAdmin.from(table));
+  if (error) {
+    console.warn(`Could not fetch ${table} from Supabase`, error.message);
+    return { data: [], error };
+  }
+  return { data: data || [], error: null };
+}
+
+async function fetchSupabaseAuthCustomers(roleMap, appointmentStats) {
+  if (!supabaseAdmin?.auth?.admin?.listUsers) return [];
+  const rows = [];
+  let page = 1;
+  const perPage = 1000;
+
+  while (page <= 10) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      console.warn("Could not fetch Supabase auth users", error.message);
+      break;
+    }
+
+    const users = data?.users || [];
+    for (const user of users) {
+      const userRoles = roleMap.get(user.id) || new Set();
+      const metadata = user.user_metadata || {};
+      const appMetadata = user.app_metadata || {};
+      const declaredRole = String(metadata.role || appMetadata.role || "").toLowerCase();
+      const isCustomer =
+        userRoles.has("customer") ||
+        declaredRole === "customer" ||
+        (!userRoles.has("owner") && !userRoles.has("admin") && !userRoles.has("staff") && !["owner", "admin", "staff"].includes(declaredRole));
+
+      if (!isCustomer) continue;
+
+      const fullName =
+        metadata.full_name ||
+        metadata.name ||
+        [metadata.first_name, metadata.last_name].filter(Boolean).join(" ") ||
+        user.email ||
+        "Unnamed Customer";
+      const phone = metadata.phone || metadata.phone_number || user.phone || "";
+      rows.push(normalizeCustomerRecord({
+        id: user.id,
+        user_id: user.id,
+        full_name: fullName,
+        email: user.email || "",
+        phone,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        source: "supabase-auth",
+        ...statsForRecordFromMap({ full_name: fullName, email: user.email || "" }, appointmentStats),
+      }));
+    }
+
+    if (users.length < perPage) break;
+    page += 1;
+  }
+
+  return rows;
+}
+
 async function fetchSupabaseCustomerRows() {
   if (!supabaseAdmin) return null;
 
-  const [{ data: profiles, error: profileError }, { data: roles, error: roleError }, appointmentResult] = await Promise.all([
-    supabaseAdmin.from("profiles").select("id,user_id,full_name,email,created_at,updated_at").order("created_at", { ascending: false }),
-    supabaseAdmin.from("user_roles").select("user_id,role"),
-    supabaseAdmin.from("appointments").select("customer_email,customer_name,status,start_at,date,created_at"),
+  const [profileResult, roleResult, appointmentResult] = await Promise.all([
+    safeSupabaseSelect("profiles", (query) => query.select("id,user_id,full_name,email,created_at,updated_at").order("created_at", { ascending: false })),
+    safeSupabaseSelect("user_roles", (query) => query.select("user_id,role")),
+    safeSupabaseSelect("appointments", (query) => query.select("customer_email,customer_name,status,start_at,date,created_at")),
   ]);
 
-  if (profileError) throw profileError;
-  if (roleError) throw roleError;
-  const appointmentStats = appointmentStatsFromRows(appointmentResult.error ? [] : appointmentResult.data || []);
+  const appointmentStats = appointmentStatsFromRows([
+    ...(appointmentResult.data || []),
+    ...state.appointments,
+  ]);
 
   const roleMap = new Map();
-  for (const role of roles || []) {
+  for (const role of roleResult.data || []) {
     if (!roleMap.has(role.user_id)) roleMap.set(role.user_id, new Set());
     roleMap.get(role.user_id).add(role.role);
   }
 
-  return (profiles || [])
+  const profileRows = (profileResult.data || [])
     .filter((profile) => {
       const userRoles = roleMap.get(profile.user_id) || new Set();
-      return userRoles.has("customer") || (!userRoles.has("owner") && !userRoles.has("staff"));
+      return userRoles.has("customer") || (!userRoles.has("owner") && !userRoles.has("admin") && !userRoles.has("staff"));
     })
     .map((profile) => normalizeCustomerRecord({ ...profile, ...statsForRecordFromMap(profile, appointmentStats) }));
+
+  const authRows = await fetchSupabaseAuthCustomers(roleMap, appointmentStats);
+  return [...profileRows, ...authRows];
 }
 
 function cleanupHolds() {
@@ -719,11 +815,12 @@ function generateSlots({ date, staffId, serviceId }) {
   const service = getService(serviceId);
   if (!service || !isStaffBookable(staffId)) return [];
   const slots = [];
-  for (let cursor = BUSINESS_OPEN_MINUTES; cursor + service.durationMinutes <= BUSINESS_CLOSE_MINUTES; cursor += SLOT_STEP_MINUTES) {
+  const durationMinutes = serviceDurationMinutes(service);
+  for (let cursor = BUSINESS_OPEN_MINUTES; cursor + durationMinutes <= BUSINESS_CLOSE_MINUTES; cursor += SLOT_STEP_MINUTES) {
     const hour = Math.floor(cursor / 60);
     const minute = cursor % 60;
     const start = atBusinessTime(date, hour, minute);
-    const end = new Date(start.getTime() + minutes(service.durationMinutes));
+    const end = new Date(start.getTime() + minutes(durationMinutes));
     const cutoffReason = validateBookingWindow(start, end);
     const conflict = findConflict({ staffId, startAt: start, endAt: end });
     const displayHour = hour >= 24 ? hour - 24 : hour;
@@ -733,7 +830,7 @@ function generateSlots({ date, staffId, serviceId }) {
       endAt: end.toISOString(),
       available: !cutoffReason && !conflict,
       blockedBy: cutoffReason ? "cutoff" : conflict?.type || null,
-      label: start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+      label: `${String(displayHour % 12 || 12)}:${String(minute).padStart(2, "0")} ${displayHour >= 12 ? "PM" : "AM"}`,
     });
   }
   return slots;
@@ -797,6 +894,9 @@ app.patch("/api/settings", requireRole("admin"), (req, res) => {
   if (!settings.salonName) return res.status(400).json({ error: "Salon name is required" });
   if (settings.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
     return res.status(400).json({ error: "Enter a valid email address" });
+  }
+  if (settings.gmailAlerts?.replyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.gmailAlerts.replyTo)) {
+    return res.status(400).json({ error: "Enter a valid Gmail reply-to email address" });
   }
   if (settings.phone && !String(settings.phone).replace(/\D/g, "").match(/^\d{7,15}$/)) {
     return res.status(400).json({ error: "Enter a valid phone number" });
@@ -974,7 +1074,7 @@ app.post("/api/holds", (req, res) => {
   if (!service) return res.status(404).json({ error: "Service not found" });
   if (!isStaffBookable(staffId)) return res.status(409).json({ error: "This staff member is offline today." });
   const start = parseBusinessStart(date, time);
-  const end = new Date(start.getTime() + minutes(service.durationMinutes));
+  const end = new Date(start.getTime() + minutes(serviceDurationMinutes(service)));
   const windowError = validateBookingWindow(start, end);
   if (windowError) return res.status(422).json({ error: windowError });
   const conflict = findConflict({ staffId, startAt: start, endAt: end });
@@ -1006,7 +1106,7 @@ app.post("/api/bookings", (req, res) => {
 
   const hold = holdId ? state.holds.find((item) => item.id === holdId && item.status === "active") : null;
   const start = hold ? new Date(hold.startAt) : parseBusinessStart(date, time);
-  const end = new Date(start.getTime() + minutes(service.durationMinutes));
+  const end = new Date(start.getTime() + minutes(serviceDurationMinutes(service)));
   const windowError = validateBookingWindow(start, end);
   if (windowError) return res.status(422).json({ error: windowError });
   const conflict = findConflict({ staffId, startAt: start, endAt: end, ignoreHoldId: hold?.id });
@@ -1066,12 +1166,13 @@ app.post("/api/appointments", requireRole("admin"), (req, res) => {
   if (!service) return res.status(404).json({ error: "Service not found" });
   if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
   const start = req.body.startAt ? new Date(req.body.startAt) : parseBusinessStart(req.body.date || today(), req.body.time || "10:00");
-  const end = new Date(start.getTime() + minutes(service.durationMinutes));
+  const end = new Date(start.getTime() + minutes(serviceDurationMinutes(service)));
   const conflict = findConflict({ staffId: staffMember.id, startAt: start, endAt: end });
   if (conflict) return res.status(409).json({ error: "That staff member is already booked at this time." });
   const appointment = makeAppointment({
     customerName: req.body.customerName,
     customerEmail: req.body.customerEmail || "",
+    customerPhone: req.body.customerPhone || "",
     staffId: staffMember.id,
     serviceId: service.id,
     startAt: start.toISOString(),
@@ -1354,6 +1455,9 @@ app.patch("/api/payroll/:staffId/status", requireRole("admin"), (req, res) => {
   if (!staffMember) return res.status(404).json({ error: "Staff member not found" });
   const month = req.body.month || monthKey();
   const record = payrollRecordFor(staffMember.id, month);
+  if (record.paid && req.body.paid === false) {
+    return res.status(409).json({ error: "Paid salary records are locked and cannot be reverted to unpaid" });
+  }
   record.paid = Boolean(req.body.paid);
   record.paidAt = record.paid ? new Date().toISOString() : null;
   record.updatedAt = new Date().toISOString();

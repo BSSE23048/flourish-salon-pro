@@ -24,7 +24,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 - Finance module with month-wise expenses, payroll cost, paid invoice revenue, and final profit
 - Admin-managed attendance with month-wise percentages, leave request alerts, and approve/reject workflow
 - Reports for revenue, payroll cost, profit after payroll, popular services, peak hours, and staff performance
-- Settings for salon profile, WhatsApp reminders, notifications, plan usage, and security notes
+- Settings for salon profile, booking rules, Gmail notification alerts, and admin notifications
 - Express API for tenant, metrics, appointments, customers, staff, attendance, leave requests, invoices, expenses, payroll, financials, plans, and subscription checkout stubs
 - Advanced scheduling: 10:00 AM to 2:00 AM business day, dynamic service durations, 2-hour booking cutoff, 4-hour cancellation window, slot holds, waitlist, and backend overlap prevention
 - Socket.io realtime updates for schedules, appointments, attendance, leave requests, invoices, staff, and payroll
@@ -53,6 +53,8 @@ Supabase database-level security and operational persistence are defined in:
 
 - `supabase/migrations/20260621190000_rbac_advanced_scheduling.sql`
 - `supabase/migrations/20260708120000_operational_demo_persistence.sql`
+- `supabase/migrations/20260708133000_salon_settings_persistence.sql`
+- `supabase/migrations/20260708143000_salon_customer_records.sql`
 
 Staff add, edit, and delete actions require the demo security PIN:
 
@@ -63,8 +65,9 @@ PIN: 1234
 ## Scheduling Rules
 
 - Business hours run from `10:00` to `02:00` next day.
-- Slot grid uses 30-minute increments, but availability is calculated from the selected service duration.
-- Services can block 30, 60, 90, 120, or more minutes.
+- Slot grid uses 1-hour increments, and availability is calculated from the selected service duration.
+- Services are normalized into 1-hour blocks for scheduling and conflict prevention.
+- Appointment times are stored as ISO 8601 UTC timestamps and displayed in the local browser timezone.
 - Customers cannot book any appointment starting less than 2 hours from the current time.
 - Customers can cancel or reschedule only more than 4 hours before appointment start.
 - Slot holds last 7 minutes and instantly block the same staff/time for everyone else.
@@ -231,6 +234,7 @@ The API hydrates operational records from Supabase on startup and writes changes
 Operational persistence tables:
 
 - `salon_staff_records`
+- `salon_customer_records`
 - `salon_service_records`
 - `salon_appointment_records`
 - `salon_attendance_records`

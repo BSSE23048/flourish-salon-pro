@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_UNAVAILABLE_MESSAGE, API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localDateKey, localMonthKey } from "@/lib/date";
+import { localTime, money } from "@/lib/format";
 import { toast } from "sonner";
 
 type Service = {
@@ -83,12 +84,8 @@ function currentMonthValue() {
   return todayInputValue().slice(0, 7);
 }
 
-function money(value: number) {
-  return `Rs. ${Number(value || 0).toLocaleString()}`;
-}
-
 function displayTime(value: string) {
-  return new Date(value).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return localTime(value);
 }
 
 function monthKey(date: Date) {

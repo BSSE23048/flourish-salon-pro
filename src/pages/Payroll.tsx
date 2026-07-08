@@ -5,11 +5,22 @@ import PageHeader from "@/components/PageHeader";
 import DataTable from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_URL, SOCKET_OPTIONS } from "@/lib/api";
 import { localMonthKey } from "@/lib/date";
+import { money } from "@/lib/format";
 import { toast } from "sonner";
 
 type Adjustment = { id: string; type: "deduction" | "bonus"; amount: number; reason: string };
@@ -54,16 +65,13 @@ const emptySummary: Summary = {
   invoiceCount: 0,
 };
 
-function money(value: number) {
-  return `Rs. ${Number(value || 0).toLocaleString()}`;
-}
-
 export default function Payroll() {
   const [month, setMonth] = useState(localMonthKey());
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(false);
   const [adjusting, setAdjusting] = useState<PayrollRow | null>(null);
+  const [confirmPaidRow, setConfirmPaidRow] = useState<PayrollRow | null>(null);
   const [adjustment, setAdjustment] = useState({ type: "deduction", amount: "", reason: "" });
 
   const loadPayroll = useCallback(async () => {
@@ -97,21 +105,22 @@ export default function Payroll() {
 
   const totals = useMemo(() => [
     { label: "Net Revenue", value: money(summary.netRevenue), sub: `${summary.invoiceCount} paid invoices` },
-    { label: "Payroll Payable", value: money(summary.payrollPayable), sub: "salary + commission - deductions" },
+    { label: "Payroll Liability", value: money(summary.payrollPayable), sub: "base salaries + commissions + bonuses - deductions" },
     { label: "Expenses", value: money(summary.expenseTotal), sub: "operating costs this month" },
     { label: "Final Profit", value: money(summary.netProfit), sub: "revenue minus payroll and expenses" },
   ], [summary]);
 
-  const markPaid = async (row: PayrollRow, paid: boolean) => {
+  const markPaid = async (row: PayrollRow) => {
     try {
       const res = await fetch(`${API_URL}/api/payroll/${row.staffId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "x-role": "admin" },
-        body: JSON.stringify({ month, paid }),
+        body: JSON.stringify({ month, paid: true }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not update payroll status");
-      toast.success(`${row.name} marked ${paid ? "paid" : "unpaid"}`);
+      toast.success(`${row.name} marked paid`);
+      setConfirmPaidRow(null);
       await loadPayroll();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update payroll status");
@@ -178,11 +187,11 @@ export default function Payroll() {
         <DataTable
           columns={[
             { key: "name", label: "Staff", render: (row) => <span className="font-medium">{row.name}</span> },
-            { key: "baseSalary", label: "Salary", render: (row) => money(row.baseSalary) },
-            { key: "commission", label: "Commission", render: (row) => money(row.commission) },
-            { key: "bonuses", label: "Bonus", render: (row) => money(row.bonuses) },
-            { key: "deductions", label: "Deductions", render: (row) => row.deductions > 0 ? <span className="text-destructive">{money(row.deductions)}</span> : "-" },
-            { key: "payable", label: "Total Payable", render: (row) => <span className="font-semibold">{money(row.payable)}</span> },
+            { key: "baseSalary", label: "Base Salary", render: (row) => money(row.baseSalary) },
+            { key: "commission", label: "Earned Commission", render: (row) => <span title="Calculated from assigned paid invoice service lines">{money(row.commission)}</span> },
+            { key: "bonuses", label: "Bonuses Given", render: (row) => money(row.bonuses) },
+            { key: "deductions", label: "Deductions / Penalties", render: (row) => row.deductions > 0 ? <span className="text-destructive">{money(row.deductions)}</span> : "-" },
+            { key: "payable", label: "Total Net Payable", render: (row) => <span className="font-semibold">{money(row.payable)}</span> },
             { key: "attendancePercentage", label: "Attendance", render: (row) => `${row.attendancePercentage}%` },
             { key: "paid", label: "Status", render: (row) => <Badge className={row.paid ? "bg-success/10 text-success hover:bg-success/10" : "bg-warning/10 text-warning hover:bg-warning/10"}>{row.paid ? "Paid" : "Unpaid"}</Badge> },
             {
@@ -190,8 +199,8 @@ export default function Payroll() {
               label: "Actions",
               render: (row) => (
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant={row.paid ? "outline" : "default"} onClick={() => markPaid(row, !row.paid)}>
-                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />{row.paid ? "Mark Unpaid" : "Mark Paid"}
+                  <Button size="sm" variant={row.paid ? "outline" : "default"} onClick={() => setConfirmPaidRow(row)} disabled={Boolean(row.paid)}>
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />{row.paid ? "Paid Locked" : "Mark Paid"}
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => { setAdjusting(row); setAdjustment({ type: "deduction", amount: "", reason: "" }); }}>
                     <MinusCircle className="mr-1 h-3.5 w-3.5" />Deduct
@@ -245,6 +254,23 @@ export default function Payroll() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={Boolean(confirmPaidRow)} onOpenChange={(open) => !open && setConfirmPaidRow(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm salary payment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to confirm this payment? This action cannot be undone, and the salary record will be locked as paid.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmPaidRow && markPaid(confirmPaidRow)}>
+              Confirm Paid
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
