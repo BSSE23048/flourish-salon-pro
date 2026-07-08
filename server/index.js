@@ -96,6 +96,32 @@ const state = {
   payroll: [],
   payrollAdjustments: [],
   expenses: [],
+  settings: {
+    id: "salon-settings",
+    salonName: "Flourish Salon Pro",
+    phone: "",
+    email: "",
+    address: "",
+    city: "",
+    timezone: businessTimeZone,
+    currency: "PKR",
+    openingTime: "10:00",
+    closingTime: "02:00",
+    bookingCutoffMinutes: BOOKING_CUTOFF_MINUTES,
+    cancellationCutoffMinutes: CANCEL_CUTOFF_MINUTES,
+    whatsapp: {
+      enabled: false,
+      reminderHours: 24,
+      template: "Reminder: your appointment at {salon} is scheduled for {time}.",
+    },
+    notifications: {
+      appointments: true,
+      payroll: true,
+      dailySummary: false,
+      leaveRequests: true,
+    },
+    updatedAt: new Date().toISOString(),
+  },
 };
 
 const supabaseTables = {
@@ -107,12 +133,17 @@ const supabaseTables = {
   payroll: "salon_payroll_records",
   payrollAdjustments: "salon_payroll_adjustment_records",
   expenses: "salon_expense_records",
+  settings: "salon_settings_records",
 };
 
 function assignTableRows(key, rows) {
   if (!Array.isArray(rows)) return;
   if (key === "staff") staff = rows;
   else if (key === "services") services.splice(0, services.length, ...rows);
+  else if (key === "settings") {
+    state.settings = { ...state.settings, ...(rows[0] || {}) };
+    state.tenant.name = state.settings.salonName || state.tenant.name;
+  }
   else state[key] = rows;
 }
 
@@ -132,6 +163,7 @@ async function hydrateSupabaseOperationalData() {
     const rows = await readSupabaseRecords(table);
     if (rows) assignTableRows(key, rows);
   }
+  if (!state.settings.updatedAt) state.settings.updatedAt = new Date().toISOString();
 }
 
 async function upsertSupabaseRecord(key, record) {
@@ -389,6 +421,38 @@ function financialSummary(month = monthKey()) {
     invoiceCount: invoices.length,
     expenseCount: expenses.length,
     expenses,
+  };
+}
+
+function normalizeSettingsPayload(input = {}, existing = state.settings) {
+  const whatsapp = input.whatsapp && typeof input.whatsapp === "object" ? input.whatsapp : {};
+  const notifications = input.notifications && typeof input.notifications === "object" ? input.notifications : {};
+  return {
+    ...existing,
+    id: "salon-settings",
+    salonName: String(input.salonName ?? existing.salonName ?? state.tenant.name).trim(),
+    phone: String(input.phone ?? existing.phone ?? "").trim(),
+    email: String(input.email ?? existing.email ?? "").trim(),
+    address: String(input.address ?? existing.address ?? "").trim(),
+    city: String(input.city ?? existing.city ?? "").trim(),
+    timezone: String(input.timezone ?? existing.timezone ?? businessTimeZone).trim(),
+    currency: String(input.currency ?? existing.currency ?? "PKR").trim(),
+    openingTime: String(input.openingTime ?? existing.openingTime ?? "10:00").trim(),
+    closingTime: String(input.closingTime ?? existing.closingTime ?? "02:00").trim(),
+    bookingCutoffMinutes: Math.max(0, Number(input.bookingCutoffMinutes ?? existing.bookingCutoffMinutes ?? BOOKING_CUTOFF_MINUTES)),
+    cancellationCutoffMinutes: Math.max(0, Number(input.cancellationCutoffMinutes ?? existing.cancellationCutoffMinutes ?? CANCEL_CUTOFF_MINUTES)),
+    whatsapp: {
+      enabled: Boolean(whatsapp.enabled ?? existing.whatsapp?.enabled),
+      reminderHours: Math.max(1, Number(whatsapp.reminderHours ?? existing.whatsapp?.reminderHours ?? 24)),
+      template: String(whatsapp.template ?? existing.whatsapp?.template ?? "").trim(),
+    },
+    notifications: {
+      appointments: Boolean(notifications.appointments ?? existing.notifications?.appointments),
+      payroll: Boolean(notifications.payroll ?? existing.notifications?.payroll),
+      dailySummary: Boolean(notifications.dailySummary ?? existing.notifications?.dailySummary),
+      leaveRequests: Boolean(notifications.leaveRequests ?? existing.notifications?.leaveRequests),
+    },
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -715,6 +779,34 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api/tenant", requireRole("admin", "staff"), (_req, res) => res.json(state.tenant));
+app.get("/api/settings", requireRole("admin", "staff"), (_req, res) => {
+  res.json({
+    tenant: state.tenant,
+    settings: state.settings,
+    plans,
+    counts: {
+      staff: staff.length,
+      services: services.length,
+      locations: Number(state.tenant.locations || 0),
+      seats: Number(state.tenant.seats || 0),
+    },
+  });
+});
+app.patch("/api/settings", requireRole("admin"), (req, res) => {
+  const settings = normalizeSettingsPayload(req.body);
+  if (!settings.salonName) return res.status(400).json({ error: "Salon name is required" });
+  if (settings.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
+    return res.status(400).json({ error: "Enter a valid email address" });
+  }
+  if (settings.phone && !String(settings.phone).replace(/\D/g, "").match(/^\d{7,15}$/)) {
+    return res.status(400).json({ error: "Enter a valid phone number" });
+  }
+  state.settings = settings;
+  state.tenant.name = settings.salonName;
+  void upsertSupabaseRecord("settings", settings);
+  io.emit("settings:update", { tenant: state.tenant, settings: state.settings });
+  res.json({ tenant: state.tenant, settings: state.settings });
+});
 app.get("/api/services", (_req, res) => res.json(services));
 app.post("/api/services", requireRole("admin"), (req, res) => {
   const payload = normalizeServicePayload(req.body);

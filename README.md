@@ -6,7 +6,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 
 - **Frontend:** Next.js 16, React 18, TypeScript, Tailwind CSS, shadcn/Radix UI, Recharts
 - **Backend:** Express, CORS, JSON REST endpoints, Socket.io realtime events
-- **Auth/Data:** Supabase client and generated database types
+- **Auth/Data:** Supabase Auth plus Supabase-backed operational records for staff, services, appointments, attendance, invoices, payroll, expenses, settings, and customer profiles
 - **Tooling:** ESLint, Vitest, Testing Library, PostCSS
 
 ## Features
@@ -16,7 +16,7 @@ Flourish Salon Pro is a salon management SaaS built with **Next.js** on the fron
 - Protected admin dashboard with Supabase auth and demo fallback
 - Staff dashboard for assigned appointments, service workflow updates, attendance percentage, salary status, commission, deductions, and payable salary
 - Realtime appointment booking with search, status filtering, backend overlap prevention, and Socket.io updates
-- Customer CRM with visit and spend tracking
+- Customer CRM with registered customer profiles, total bookings, completed visit counts, and last visited dates
 - Staff management with salary, commission rate, attendance percentage, payable salary, leaderboard views, and PIN-protected add/edit/delete actions
 - Service menu CRUD with category filters
 - Service-linked billing and invoice generation with staff assignment, quantities, custom "other service" line items, optional discounts, downloadable receipts, and automatic commission calculation
@@ -49,7 +49,10 @@ RBAC is enforced in three places:
 - `ProtectedRoute` performs client-side auth and role checks.
 - Express middleware reads `x-role` / `x-staff-id` and blocks unauthorized API access.
 
-Supabase database-level security is defined in `supabase/migrations/20260621190000_rbac_advanced_scheduling.sql`.
+Supabase database-level security and operational persistence are defined in:
+
+- `supabase/migrations/20260621190000_rbac_advanced_scheduling.sql`
+- `supabase/migrations/20260708120000_operational_demo_persistence.sql`
 
 Staff add, edit, and delete actions require the demo security PIN:
 
@@ -137,6 +140,15 @@ PORT="4000"
 
 The project also keeps the previous `VITE_SUPABASE_*` values for compatibility, but Next.js uses the `NEXT_PUBLIC_*` variables in the browser.
 
+The Express API also needs a server-side Supabase secret in local `.env` and in the Render backend environment:
+
+```env
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_SECRET_KEY="your-server-side-supabase-secret"
+```
+
+Do not expose `SUPABASE_SECRET_KEY` in Vercel or any browser-facing environment.
+
 ## Google OAuth
 
 Google sign-in uses Supabase Auth. In Supabase, enable the Google provider and paste the Google Cloud OAuth client ID and client secret.
@@ -171,6 +183,8 @@ The Express backend lives in `server/index.js`.
 
 - `GET /api/health`
 - `GET /api/tenant`
+- `GET /api/settings`
+- `PATCH /api/settings`
 - `GET /api/services`
 - `POST /api/services`
 - `PATCH /api/services/:id`
@@ -212,7 +226,21 @@ The Express backend lives in `server/index.js`.
 - `GET /api/plans`
 - `POST /api/subscription/checkout`
 
-The API currently uses in-memory demo data so local development is instant. For production, connect these routes to Supabase tables, verify JWTs in Express middleware, persist payroll, invoice, and expense records, and wire checkout only if you later choose to collect online payments.
+The API hydrates operational records from Supabase on startup and writes changes back to Supabase through `server/index.js`. Browser clients continue to use the Express API; the operational JSONB tables are backend-managed with the server-side Supabase secret key.
+
+Operational persistence tables:
+
+- `salon_staff_records`
+- `salon_service_records`
+- `salon_appointment_records`
+- `salon_attendance_records`
+- `salon_invoice_records`
+- `salon_payroll_records`
+- `salon_payroll_adjustment_records`
+- `salon_expense_records`
+- `salon_settings_records`
+
+`GET /api/health` reports whether the backend is connected to these Supabase tables.
 
 ## Verification
 
